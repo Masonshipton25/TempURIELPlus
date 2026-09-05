@@ -3,7 +3,6 @@ import logging
 import math
 import os
 import re
-import sys
 
 
 import numpy as np
@@ -94,66 +93,82 @@ class URIELPlusDatabases(BaseURIEL):
 
             Args:
                 database (str): The name of the database to check.
-
-
-            Logging:
-                Error: Logs if the database is already integrated.
         """
         all_sources = [str(s).upper() for s in self.sources[1]]
-
-        if any(database.upper() in s for s in all_sources) or "GLOTTOLOG" in all_sources:
-            logging.error(f"{database} database already integrated.")
-            sys.exit(1)
+        return database.upper() in all_sources
 
 
     def _calculate_phylogeny_vectors(self):
         """
-            This function reads the relevant CSV file and updates the phylogeny arrays based on the phylogeny
-            classifications of new languages.
+            This function reads the relevant CSV file and updates the phylogeny arrays based on the full lineage
+            of new languages. Each lineage node, from root to leaf, becomes its own path-qualified feature
+            (F_<root> > <child> > ... > <node>), and every ancestor node in a language's lineage is set to 1.
 
-
+            
             If caching is enabled, updates the "family_features.npz" file.
-           
         """
         csv_path = os.path.join(self.cur_dir, "database", "urielplus_csvs", "lang_fam_geo.csv")
         fam_geo_feat_csv = pd.read_csv(csv_path)
+        fam_geo_feat_csv.columns = fam_geo_feat_csv.columns.str.strip('"')
+
+
+        # If a language has more than one row (e.g. minn1241), keep the one with the longer/deeper lineage.
+        fam_geo_feat_csv["_depth"] = fam_geo_feat_csv["lineage"].fillna("").apply(
+            lambda value: len([part for part in str(value).split(",") if part.strip()])
+        )
+        fam_geo_feat_csv = fam_geo_feat_csv.sort_values(
+            ["language_id", "_depth"], ascending=[True, False], kind="stable"
+        ).drop_duplicates("language_id", keep="first")
 
 
         new_langs = np.setdiff1d(self.langs[1], self.langs[0])
 
 
         for l in new_langs:
-            fam = fam_geo_feat_csv.loc[fam_geo_feat_csv["code"] == l, "families"]
-            if fam.empty:
-                self.data[0] = np.vstack([self.data[0], -1.0 * np.ones((1, self.data[0].shape[1], self.data[0].shape[2]))])
-                self.langs[0] = np.append(self.langs[0], l)
-                continue
-            fam = fam.values[0]
-            if not isinstance(fam, str):
-                self.data[0] = np.vstack([self.data[0], -1.0 * np.ones((1, self.data[0].shape[1], self.data[0].shape[2]))])
-                self.langs[0] = np.append(self.langs[0], l)
-                continue
-            self.data[0] = np.vstack([self.data[0], 0.0 * np.ones((1, self.data[0].shape[1], self.data[0].shape[2]))])
+            row = fam_geo_feat_csv.loc[fam_geo_feat_csv["language_id"] == l]
+
+            self.data[0] = np.vstack([self.data[0], -1.0 * np.ones((1, self.data[0].shape[1], self.data[0].shape[2]))])
             self.langs[0] = np.append(self.langs[0], l)
             new_lang_idx = np.where(self.langs[0] == l)[0]
-            fams = fam.split(',') if ',' in fam else [fam]
-            for f in fams:
-                f = f.lstrip()
-                fam_string = "F_" + f
+
+            if row.empty:
+                continue
+
+            lineage_value = row["lineage"].values[0]
+            if not isinstance(lineage_value, str) or not lineage_value.strip():
+                continue
+
+            parts = [part.strip() for part in lineage_value.split(",") if part.strip()]
+            if not parts:
+                continue
+
+            # Every existing family node is known to be absent for this language unless proven present below.
+            self.data[0][new_lang_idx, :, -1] = 0.0
+
+            path = []
+            for part in parts:
+                path.append(part)
+                fam_string = "F_" + " > ".join(path)
                 family_idx = np.where(self.feats[0] == fam_string)[0]
                 if len(family_idx) == 0:
-                    continue
+                    self.data[0] = self._set_new_data_dimensions(self.data[0], [fam_string], [], [])
+                    self.feats[0] = np.append(self.feats[0], fam_string)
+                    family_idx = np.array([len(self.feats[0]) - 1])
                 self.data[0][new_lang_idx, family_idx, -1] = 1.0
-
 
         if self.cache:
             np.savez(os.path.join(self.cur_dir, "database", self.files[0]), feats=self.feats[0], data=self.data[0], langs=self.langs[0], sources=self.sources[0])
 
 
+        self._sync_loaded_features(0)
+        self._refresh_indexes(0)
+
+
     def _calculate_geocoord_vectors(self):
         """
             This function calculates geographic distance vectors between new languages and existing geocoordinates.
-            Each new language gets a vector of normalized distances to all known coordinates (in km).
+            Each new language gets a vector of distances to all known coordinates (in km), normalized by Earth's
+            antipodal distance (π x 6371.0 km).
             Uses the provided getGreatCircleDistance function for great-circle distance.
 
             If caching is enabled, updates the `geocoord_features.npz` file.
@@ -167,12 +182,14 @@ class URIELPlusDatabases(BaseURIEL):
         csv_path = os.path.join(self.cur_dir, "database", "urielplus_csvs", "lang_fam_geo.csv")
         fam_geo_feat_csv = pd.read_csv(csv_path)
         fam_geo_feat_csv.columns = fam_geo_feat_csv.columns.str.strip('"')
-        fam_geo_feat_csv["lat"] = pd.to_numeric(fam_geo_feat_csv["lat"], errors="coerce")
-        fam_geo_feat_csv["lon"] = pd.to_numeric(fam_geo_feat_csv["lon"], errors="coerce")
-        fam_geo_feat_csv["lon"] = fam_geo_feat_csv["lon"].apply(
+        fam_geo_feat_csv["latitude"] = pd.to_numeric(fam_geo_feat_csv["latitude"], errors="coerce")
+        fam_geo_feat_csv["longitude"] = pd.to_numeric(fam_geo_feat_csv["longitude"], errors="coerce")
+        fam_geo_feat_csv["longitude"] = fam_geo_feat_csv["longitude"].apply(
             lambda x: x - 360 if x > 180 else (x + 360 if x < -180 else x)
         )
-        fam_geo_feat_csv["lat"] = fam_geo_feat_csv["lat"].apply(lambda x: max(min(x, 90), -90))
+        fam_geo_feat_csv["latitude"] = fam_geo_feat_csv["latitude"].apply(lambda x: max(min(x, 90), -90))
+
+        MAX_DIST = math.pi * 6371.000  # Earth's antipodal distance, ~20015.1 km
 
         # Function provided by Dr. Patrick Littell
         def getGreatCircleDistance(lat1, lon1, lat2, lon2):
@@ -192,43 +209,39 @@ class URIELPlusDatabases(BaseURIEL):
 
         for i, l in enumerate(new_langs):
             try:
-                row = fam_geo_feat_csv.loc[fam_geo_feat_csv["code"].str.strip('"') == l]
+                row = fam_geo_feat_csv.loc[fam_geo_feat_csv["language_id"].str.strip('"') == l]
                 if row.empty:
-                    self.data[2][-len(new_langs) + i, :, -1] = np.nan
+                    self.data[2][-len(new_langs) + i, :, -1] = -1.0
                     continue
 
-                lat, lon = row["lat"].values[0], row["lon"].values[0]
+                lat, lon = row["latitude"].values[0], row["longitude"].values[0]
                 if pd.isna(lat) or pd.isna(lon):
-                    self.data[2][-len(new_langs) + i, :, -1] = np.nan
+                    self.data[2][-len(new_langs) + i, :, -1] = -1.0
                     continue
 
                 distances = []
                 for c in coords:
                     if np.isnan(c[0]) or np.isnan(c[1]):
-                        distances.append(np.nan)
+                        distances.append(-1.0)
                     else:
-                        distances.append(getGreatCircleDistance(lat, lon, c[0], c[1]))
+                        distances.append(getGreatCircleDistance(lat, lon, c[0], c[1]) / MAX_DIST)
 
-                distances_array = np.array(distances, dtype=np.float32)
-                max_dist = np.nanmax(distances_array)
-                min_dist = np.nanmin(distances_array)
-                if max_dist == min_dist:
-                    norm_distances = np.zeros_like(distances_array)
-                else:
-                    norm_distances = (distances_array - min_dist) / (max_dist - min_dist)
-
-                self.data[2][-len(new_langs) + i, :, -1] = norm_distances
+                self.data[2][-len(new_langs) + i, :, -1] = np.array(distances, dtype=np.float32)
 
             except Exception:
-                self.data[2][-len(new_langs) + i, :, -1] = np.nan
+                self.data[2][-len(new_langs) + i, :, -1] = -1.0
 
         if self.cache:
             np.savez(os.path.join(self.cur_dir, "database", self.files[2]), feats=self.feats[2], data=self.data[2], langs=self.langs[2], sources=self.sources[2])
 
 
-    def _calculate_scriptural_vectors(self):
+        self._sync_loaded_features(2)
+        self._refresh_indexes(2)
+
+
+    def _calculate_script_vectors(self):
         """
-            This function calculates scriptural vectors for new languages.
+            This function calculates script vectors for new languages.
 
             If caching is enabled, updates the `script_features.npz` file.
         """
@@ -239,12 +252,12 @@ class URIELPlusDatabases(BaseURIEL):
         csv_path = os.path.join(self.cur_dir, "database", "urielplus_csvs", "script_data.csv")
         script_csv = pd.read_csv(csv_path)
         script_csv.columns = script_csv.columns.str.strip('"')
-        script_csv['code'] = script_csv['code'].str.strip('"') 
+        script_csv['language_id'] = script_csv['language_id'].str.strip('"') 
 
-        script_feat_cols = [col for col in script_csv.columns if col not in ['code', 'name']]
+        script_feat_cols = [col for col in script_csv.columns if col not in ['language_id', 'language_name']]
 
         for i, lang in enumerate(new_langs):
-            lang_row = script_csv.loc[script_csv['code'] == lang]
+            lang_row = script_csv.loc[script_csv['language_id'] == lang]
 
             if lang_row.empty:
                 self.data[3][-len(new_langs) + i, :, -1] = -1.0
@@ -258,96 +271,129 @@ class URIELPlusDatabases(BaseURIEL):
             np.savez(os.path.join(self.cur_dir, "database", self.files[3]), feats=self.feats[3], data=self.data[3], langs=self.langs[3], sources=self.sources[3])
 
 
+        self._sync_loaded_features(3)
+        self._refresh_indexes(3)
 
-    def _load_duplicate_feature_sets(self):
+
+    def _get_or_create_derived_source(self):
         """
-            This function loads the JSON file defining duplicate and inferable feature mappings used for feature combination in URIEL+.
+            Returns the index of the "DERIVED" pseudo-source in self.sources[1], creating an empty layer
+            (initialized to -1 for every existing language and feature) if it does not already exist.
         """
-        path = os.path.join(self.cur_dir, "database", "urielplus_csvs", "duplicate_feature_sets.json")
+        matches = np.where(self.sources[1] == "DERIVED")[0]
+        if len(matches):
+            return int(matches[0])
+        self.data[1] = self._set_new_data_dimensions(self.data[1], [], [], ["DERIVED"])
+        self.sources[1] = np.append(self.sources[1], "DERIVED")
+        return len(self.sources[1]) - 1
+
+
+    def _load_feature_mappings(self):
+        """
+            This function loads the JSON file defining feature consolidation mappings used for combining and
+            inferring feature data in URIEL+.
+        """
+        path = os.path.join(self.cur_dir, "database", "urielplus_csvs", "feature_mappings.json")
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
-        
 
-    def _ensure_duplicate_feature_sets(self):
+
+    def _ensure_feature_mappings(self):
         """
-            This function ensures duplicate feature sets are loaded before use.
+            This function ensures feature mappings are loaded before use.
         """
-        if not hasattr(self, "duplicate_feature_sets"):
-            self.duplicate_feature_sets = self._load_duplicate_feature_sets()
-    
-
-    def combine_features(self, secondary_source, feature_sets):
-        """
-            Combines duplicate features and handles opposite features within a specified category of URIEL+ data.
-
-
-            Args:
-                secondary_source (str): The source of the secondary features to combine.
-                feat_sets (list): A list of feature sets, each containing the primary feature and the secondary
-                features to combine.
-        """
-        indices = np.where(self.sources[1] == secondary_source)[0]
-        if len(indices) == 0:
-            return
-        secondary_source_index = indices[0]
-
-        for rule in feature_sets:
-            primary_feature = rule["target"]
-            secondary_features = rule["sources"]
-            specific_value = rule.get("threshold", None)
-
-            if primary_feature not in self.feats[1]:
-                self.data[1] = self._set_new_data_dimensions(self.data[1], [primary_feature], [], [])
-                self.feats[1] = np.append(self.feats[1], primary_feature)
-                primary_feature_index = len(self.feats[1]) - 1
-            else:
-                primary_feature_index = np.where(self.feats[1] == primary_feature)[0][0]
-
-            for secondary_feature in secondary_features:
-                if secondary_feature not in self.feats[1]:
-                    continue
-
-                secondary_feature_index = np.where(self.feats[1] == secondary_feature)[0][0]
-
-                for lang_idx in range(len(self.langs[1])):
-                    secondary_data = self.data[1][lang_idx][secondary_feature_index]
-                    primary_data = self.data[1][lang_idx][primary_feature_index]
-
-                    for src_idx in range(len(primary_data)):
-                        if src_idx != secondary_source_index:
-                            continue
-
-                        if specific_value is not None:
-                            is_primary_unknown = primary_data[src_idx] == -1.0
-                            is_primary_absent = primary_data[src_idx] == 0.0
-                            is_secondary_present = secondary_data[src_idx] == specific_value
-
-                            if (is_primary_unknown or is_primary_absent) and is_secondary_present:
-                                self.data[1][lang_idx][primary_feature_index][src_idx] = specific_value
-                        else:
-                            if secondary_data[src_idx] > primary_data[src_idx]:
-                                self.data[1][lang_idx][primary_feature_index][src_idx] = secondary_data[src_idx]
-
-        if self.cache:
-            np.savez(os.path.join(self.cur_dir, "database", self.files[1]),
-                feats=self.feats[1], langs=self.langs[1], data=self.data[1], sources=self.sources[1])
+        if not hasattr(self, "feature_mappings"):
+            self.feature_mappings = self._load_feature_mappings()
 
 
     def inferred_features(self):
         """
-            Combines duplicate features across all sources in URIEL+ by using the `combine_features` function.
+            Consolidates typological features according to "feature_mappings.json". Exact-collapse rules combine
+            several raw operand features into one target using a three-valued OR evaluated across every real
+            source. Positive-implication rules propagate a "1" from an antecedent feature to a consequent
+            feature, one-way only, applied repeatedly until no value changes (since one rule's output can be
+            another rule's input). Both kinds of rule write into a dedicated "DERIVED" pseudo-source, never
+            overwriting any real source's own values.
 
-
-            The function iterates through the available sources and combines features based on predefined sets of
-            duplicate features.
+            If caching is enabled, updates the "features.npz" file.
         """
-        self._ensure_duplicate_feature_sets()
+        self._ensure_feature_mappings()
+
+        derived_index = self._get_or_create_derived_source()
+        feature_position = {str(feat): idx for idx, feat in enumerate(self.feats[1])}
 
         logging.info("Inferring feature data based on similar features.....")
-        rules = self.duplicate_feature_sets["uriel"]
 
-        for source in self.sources[1]:
-            self.combine_features(source, rules)
+        # --- Exact collapse: three-valued OR across named operand features, over every real source ---
+        for record in self.feature_mappings:
+            if record.get("database") != "URIELPLUS" or record.get("relationship") != "exact_collapse":
+                continue
+            operands = [item["id"] for item in record.get("source_features", ())]
+            targets = [t for t in record.get("targets", ()) if t.get("matrix") == "typological"]
+            if not operands or not targets:
+                continue
+            if any(op not in feature_position for op in operands):
+                continue  # operand not present in this build yet; nothing to collapse
+
+            real_source_indices = [i for i in range(len(self.sources[1])) if i != derived_index]
+            operand_indices = [feature_position[op] for op in operands]
+            operand_values = self.data[1][:, operand_indices, :][:, :, real_source_indices]
+
+            collapsed = np.where(
+                np.any(operand_values == 1, axis=(1, 2)), 1,
+                np.where(np.all(operand_values == 0, axis=(1, 2)), 0, -1)
+            )
+
+            for target in targets:
+                target_feature = target["feature_id"]
+                if target_feature not in feature_position:
+                    self.data[1] = self._set_new_data_dimensions(self.data[1], [target_feature], [], [])
+                    self.feats[1] = np.append(self.feats[1], target_feature)
+                    feature_position[target_feature] = len(self.feats[1]) - 1
+                    derived_index = self._get_or_create_derived_source()
+
+                target_index = feature_position[target_feature]
+                current = self.data[1][:, target_index, derived_index]
+                self.data[1][:, target_index, derived_index] = np.maximum(current, collapsed)
+
+        # --- Positive implication: propagate "1" from antecedent to consequent, to a fixpoint ---
+        implication_records = [
+            record for record in self.feature_mappings
+            if record.get("database") == "URIELPLUS" and record.get("relationship") == "positive_implication"
+            and any(t.get("matrix") == "typological" for t in record.get("targets", ()))
+        ]
+
+        for _ in range(len(implication_records) + 1):
+            changed = False
+            for record in implication_records:
+                antecedents = [item["id"] for item in record.get("source_features", ())]
+                targets = [t for t in record.get("targets", ()) if t.get("matrix") == "typological"]
+                if len(targets) != 1 or any(a not in feature_position for a in antecedents):
+                    continue
+                target_feature = targets[0]["feature_id"]
+                if target_feature not in feature_position:
+                    continue
+
+                antecedent_indices = [feature_position[a] for a in antecedents]
+                active = np.any(self.data[1][:, antecedent_indices, :] == 1, axis=(1, 2))
+
+                target_index = feature_position[target_feature]
+                update = active & (self.data[1][:, target_index, derived_index] != 1)
+                if update.any():
+                    self.data[1][update, target_index, derived_index] = 1
+                    changed = True
+            if not changed:
+                break
+
+        if self.cache:
+            np.savez(os.path.join(self.cur_dir, "database", self.files[1]),
+                    feats=self.feats[1], data=self.data[1], langs=self.langs[1], sources=self.sources[1])
+
+
+        self._sync_loaded_features(1)
+        self._refresh_indexes(1)
+
+        logging.info("Feature inference complete.")
 
 
     def integrate_saphon(self, convert_glottocodes_param=False):
@@ -361,7 +407,9 @@ class URIELPlusDatabases(BaseURIEL):
             Args:
                 convert_glottocodes_param (bool): If True, converts language codes to Glottocodes.
         """
-        self.is_database_incorporated("UPDATED_SAPHON")
+        if self.is_database_incorporated("UPDATED_SAPHON"):
+            logging.info("UPDATED_SAPHON already integrated; skipping.")
+            return
 
 
         logging.info("Importing updated SAPHON from \"saphon_data.csv\"....")
@@ -370,7 +418,7 @@ class URIELPlusDatabases(BaseURIEL):
         saphon_data = pd.read_csv(os.path.join(self.cur_dir, "database", "urielplus_csvs", "saphon_data.csv"))
 
 
-        code_col = "code" if (self.codes == "Iso" and not convert_glottocodes_param) else "glottocode"
+        code_col = "iso_code" if (self.codes == "Iso" and not convert_glottocodes_param) else "glottocode"
 
 
         source_index = np.where(self.sources[1] == "PHOIBLE_SAPHON")
@@ -402,7 +450,9 @@ class URIELPlusDatabases(BaseURIEL):
             This function integrates the BDPROTO data, converting language codes to Glottocodes if necessary,
             and updates the feature data in URIEL+.
         """
-        self.is_database_incorporated("BDPROTO")
+        if self.is_database_incorporated("BDPROTO"):
+            logging.info("BDPROTO already integrated; skipping.")
+            return
 
 
         logging.info("Importing BDPROTO from \"bdproto_data.csv\"....")
@@ -415,7 +465,7 @@ class URIELPlusDatabases(BaseURIEL):
         bdproto_data = pd.read_csv(os.path.join(self.cur_dir, "database", "urielplus_csvs", "bdproto_data.csv"))
 
 
-        new_langs = self._get_new_languages(self.langs[1], bdproto_data, "name")
+        new_langs = self._get_new_languages(self.langs[1], bdproto_data, "language_id")
         new_source = "BDPROTO"
 
 
@@ -424,7 +474,7 @@ class URIELPlusDatabases(BaseURIEL):
 
 
         new_langs_added = 0
-        for i, lang in enumerate(bdproto_data["name"]):
+        for i, lang in enumerate(bdproto_data["language_id"]):
             lang_index = None
             try:
                 lang_index = np.where(self.langs[1] == lang)[0][0]
@@ -448,7 +498,11 @@ class URIELPlusDatabases(BaseURIEL):
 
         self._calculate_phylogeny_vectors()
         self._calculate_geocoord_vectors()
-        self._calculate_scriptural_vectors()
+        self._calculate_script_vectors()
+
+
+        self._sync_loaded_features(1)
+        self._refresh_indexes(1)
 
 
         logging.info("BDPROTO integration complete.")
@@ -462,8 +516,11 @@ class URIELPlusDatabases(BaseURIEL):
             This function integrates the Grambank data, converting language codes to Glottocodes if necessary,
             and updates the feature data in URIEL+.
         """
-        self.is_database_incorporated("GRAMBANK")
-        self._ensure_duplicate_feature_sets()
+        if self.is_database_incorporated("GRAMBANK"):
+            logging.info("GRAMBANK already integrated; skipping.")
+            return
+
+        self._ensure_feature_mappings()
 
 
         logging.info("Importing Grambank from \"grambank_data.csv\"....")
@@ -478,7 +535,7 @@ class URIELPlusDatabases(BaseURIEL):
 
 
         new_feats = self._get_new_features(self.feats[1], grambank_data.columns[1:])
-        new_langs = self._get_new_languages(self.langs[1], grambank_data, "code")
+        new_langs = self._get_new_languages(self.langs[1], grambank_data, "language_id")
         new_source = "GRAMBANK"
 
 
@@ -490,7 +547,7 @@ class URIELPlusDatabases(BaseURIEL):
 
 
         new_langs_added = 0
-        for i, lang in enumerate(grambank_data["code"]):
+        for i, lang in enumerate(grambank_data["language_id"]):
             lang_index = None
             try:
                 lang_index = np.where(self.langs[1] == lang)[0][0]
@@ -514,10 +571,10 @@ class URIELPlusDatabases(BaseURIEL):
 
         self._calculate_phylogeny_vectors()
         self._calculate_geocoord_vectors()
-        self._calculate_scriptural_vectors()
+        self._calculate_script_vectors()
 
 
-        self.combine_features("GRAMBANK", self.duplicate_feature_sets["uriel_grambank"])
+        self.inferred_features()
 
 
         logging.info("Grambank integration complete.")
@@ -531,8 +588,11 @@ class URIELPlusDatabases(BaseURIEL):
             This function integrates the APiCS data, converting language codes to Glottocodes if necessary,
             and updates the feature data in URIEL+.
         """
-        self.is_database_incorporated("APICS")
-        self._ensure_duplicate_feature_sets()
+        if self.is_database_incorporated("APICS"):
+            logging.info("APICS already integrated; skipping.")
+            return
+        
+        self._ensure_feature_mappings()
 
 
         logging.info("Importing APiCS from \"apics_data.csv\"....")
@@ -545,11 +605,10 @@ class URIELPlusDatabases(BaseURIEL):
         apics_data = pd.read_csv(os.path.join(self.cur_dir, "database", "urielplus_csvs", "apics_data.csv"))
 
 
-        new_langs = self._get_new_languages(self.langs[1], apics_data, "Language_ID")
+        new_langs = self._get_new_languages(self.langs[1], apics_data, "language_id")
 
 
-        apics_data = apics_data.drop(columns=["Name"])
-        apics_data = apics_data[["Language_ID"] + [col for col in apics_data.columns if col != "Language_ID"]]
+        apics_data = apics_data[["language_id"] + [col for col in apics_data.columns if col != "language_id"]]
 
 
         new_feats = self._get_new_features(self.feats[1], apics_data.columns[1:])
@@ -566,7 +625,7 @@ class URIELPlusDatabases(BaseURIEL):
 
 
         new_langs_added = 0
-        for i, lang in enumerate(apics_data["Language_ID"]):
+        for i, lang in enumerate(apics_data["language_id"]):
             lang_index = None
             try:
                 lang_index = np.where(self.langs[1] == lang)[0][0]
@@ -592,10 +651,10 @@ class URIELPlusDatabases(BaseURIEL):
 
         self._calculate_phylogeny_vectors()
         self._calculate_geocoord_vectors()
-        self._calculate_scriptural_vectors()
+        self._calculate_script_vectors()
 
 
-        self.combine_features("APICS", self.duplicate_feature_sets["uriel_apics"])
+        self.inferred_features()
 
 
         logging.info("APiCS integration complete.")
@@ -609,8 +668,11 @@ class URIELPlusDatabases(BaseURIEL):
             This function integrates the EWAVE data, converting language codes to Glottocodes if necessary,
             and updates the feature data in URIEL+.
         """
-        self.is_database_incorporated("EWAVE")
-        self._ensure_duplicate_feature_sets()
+        if self.is_database_incorporated("EWAVE"):
+            logging.info("EWAVE already integrated; skipping.")
+            return
+        
+        self._ensure_feature_mappings()
 
 
         logging.info("Importing eWAVE from \"english_dialect_data.csv\"....")
@@ -623,7 +685,7 @@ class URIELPlusDatabases(BaseURIEL):
         df = pd.read_csv(os.path.join(os.path.join(self.cur_dir, "database", "urielplus_csvs", "english_dialect_data.csv")))
 
 
-        new_langs = self._get_new_languages(self.langs[1], df, "name")
+        new_langs = self._get_new_languages(self.langs[1], df, "language_id")
         new_feats = self._get_new_features(self.feats[1], df.columns[1:])
         new_source = "EWAVE"
 
@@ -636,7 +698,7 @@ class URIELPlusDatabases(BaseURIEL):
 
 
         new_langs_added = 0
-        for i, lang in enumerate(df["name"]):
+        for i, lang in enumerate(df["language_id"]):
             lang_index = None
             try:
                 lang_index = np.where(self.langs[1] == lang)[0][0]
@@ -660,10 +722,10 @@ class URIELPlusDatabases(BaseURIEL):
 
         self._calculate_phylogeny_vectors()
         self._calculate_geocoord_vectors()
-        self._calculate_scriptural_vectors()
+        self._calculate_script_vectors()
 
 
-        self.combine_features("EWAVE", self.duplicate_feature_sets["uriel_ewave"])
+        self.inferred_features()
 
 
         logging.info("eWAVE integration complete.")
@@ -671,18 +733,13 @@ class URIELPlusDatabases(BaseURIEL):
 
     def integrate_glottolog(self):
         """
-            Updates URIEL+ with data from the Glottolog database.
+            Updates URIEL+ with additional dialect-level language entries from the Glottolog classification.
 
-
-            This function integrates the Glottolog data.
-
-
-            Args:
-                convert_glottocodes_param (bool): If True, converts language codes to Glottocodes.
+            "GLOTTOLOG" is already a baseline source in the released database, so its presence in
+            self.sources[1] does not indicate whether dialect expansion has happened — this function instead
+            checks "dialects.csv" directly for any Glottocodes not yet present in URIEL+'s language list, and
+            is a no-op if there are none.
         """
-        self.is_database_incorporated("GLOTTOLOG")
-
-
         logging.info("Importing Glottolog from \"dialects.csv\"....")
 
 
@@ -707,6 +764,11 @@ class URIELPlusDatabases(BaseURIEL):
         new_langs = sorted(new_langs - existing_langs)
 
 
+        if not new_langs:
+            logging.info("GLOTTOLOG dialects already integrated; skipping.")
+            return
+
+
         self.data[1] = self._set_new_data_dimensions(self.data[1], [], new_langs, [])
         self.langs[1] = np.append(self.langs[1], np.array(new_langs).flatten())
         
@@ -718,7 +780,11 @@ class URIELPlusDatabases(BaseURIEL):
 
         self._calculate_phylogeny_vectors()
         self._calculate_geocoord_vectors()
-        self._calculate_scriptural_vectors()
+        self._calculate_script_vectors()
+
+
+        self._sync_loaded_features(1)
+        self._refresh_indexes(1)
 
 
         logging.info("Glottolog integration complete.")
@@ -726,7 +792,7 @@ class URIELPlusDatabases(BaseURIEL):
     
     def integrate_databases(self):
         """
-            Updates URIEL+ with data from all available databases (UPDATED_SAPHON, BDPROTO, GRAMBANK, APICS, EWAVE).
+            Updates URIEL+ with data from all available databases (UPDATED_SAPHON, BDPROTO, GRAMBANK, APICS, EWAVE, GLOTTOLOG).
         """
         logging.info("Importing all databases....")
 
@@ -737,13 +803,13 @@ class URIELPlusDatabases(BaseURIEL):
             "GRAMBANK": self.integrate_grambank,
             "APICS": self.integrate_apics,
             "EWAVE": self.integrate_ewave,
-            "GLOTTOLOG": self.integrate_glottolog
         }
        
         for db, integrate_method in databases.items():
-            if db not in self.sources[1]:
+            if not self.is_database_incorporated(db):
                 integrate_method()
 
+        self.integrate_glottolog()
         self.inferred_features()
 
 
@@ -759,8 +825,8 @@ class URIELPlusDatabases(BaseURIEL):
                 *args: Databases to update URIEL+ with.
 
 
-            Logging:
-                Error: Logs an error if a provided databases is invalid.
+            Raises:
+                KeyError: If a provided database name is invalid.
         """
         logging.info("Importing custom databases....")
 
@@ -783,12 +849,9 @@ class URIELPlusDatabases(BaseURIEL):
 
 
         for db in databases:
-            if db in valid_databases and db not in self.sources[1]:
+            if db not in valid_databases:
+                raise KeyError(f"Unknown database: {db}. Valid databases are {list(valid_databases.keys())}.")
+            if db == "GLOTTOLOG" or not self.is_database_incorporated(db):
                 valid_databases[db]()
-            elif db in self.sources[1]:
-                pass
-            else:
-                logging.error(f"Unknown database: {db}. Valid databases are {list(valid_databases.keys())}.")
-                sys.exit(1)
            
         logging.info("Custom databases integration complete.")

@@ -60,7 +60,7 @@ class URIELPlusImputation(BaseURIEL):
             If caching is enabled, creates an npz file with the union or average of feature data across sources in URIEL+.
 
             Args:
-                idx (int): The index of the file (typological and features.npz, scriptural and script_features.npz).
+                idx (int): The index of the file (typological and features.npz, script and script_features.npz).
         """
         if self.aggregation == 'U':
             logging.info("Creating union of data across sources....")

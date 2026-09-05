@@ -97,7 +97,7 @@ Python 3.10 or later. If you're working with the `MIDASpy` extra dependencies, v
     ```python
     u.get_{vector_type}_{feature_type}_array()
     ```
-+ Replace `{vector_type}` with `phylogeny`, `typological`, `geography`, or `scriptural`.
++ Replace `{vector_type}` with `phylogeny`, `typological`, `geography`, or `script`.
 + Replace `{feature_type}` with `features`, `languages`, `data`, or `sources`.
 
 + Example:
@@ -134,11 +134,11 @@ Python 3.10 or later. If you're working with the `MIDASpy` extra dependencies, v
 
 + Replace `{database}` with `saphon`, `bdproto`, `grambank`, `apics`, `ewave`, or `glottolog`.
 + Replace `{databases}` with arguments `"UPDATED_SAPHON"`, `"BDPROTO"`, `"GRAMBANK"`, `"APICS"`, `"EWAVE"`, and/or `"GLOTTOLOG"` (e.g., `"UPDATED_SAPHON"`, `"BDPROTO"`, `"EWAVE"`).
-+ Replace `{index}` with `0` for genetic data, `1` for typological data, `2` for geographic data, or `3` for scriptural data.
++ Replace `{index}` with `0` for genetic data, `1` for typological data, `2` for geographic data, or `3` for script data.
 
 ## Imputation Examples
 
-+ Aggregate Typological and Scriptural Data:
++ Aggregate Typological and script Data:
     ```python
     u.set_aggregation({aggregation}) 
     u.aggregate()

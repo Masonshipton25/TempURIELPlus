@@ -6,7 +6,6 @@ from .urielplus_querying import URIELPlusQuerying
 import logging
 import os
 import shutil
-import sys
 
 
 import numpy as np
@@ -22,7 +21,7 @@ URIEL+ library for integrating new and updated databases into URIEL and robust d
 Contributors: Aditya Khan (adityakhan@cs.toronto.edu), Mason Shipton (masonshipton25@gmail.com), York Hay Ng (york.ng@mail.utoronto.ca), David Anugraha (anugraha@cs.toronto.edu), Kaiyao Duan (davidduan04@gmail.com), Phuong H. Hoang (fiona.hoang@mail.utoronto.ca), Eric Khiu (erickhiu@umich.edu), Xiang Lu (jameslx@umich.edu), A. Seza Doğruöz (as.dogruoz@ugent.be), En-Shiun Annie Lee (annie.lee@ontariotechu.ca)
 
 
-Last modified: October 30, 2025
+Last modified: September 3, 2026
 '''
 
 
@@ -31,14 +30,6 @@ class URIELPlus(URIELPlusDatabases, URIELPlusImputation, URIELPlusQuerying):
         """
             Initializes the URIEL+ class, setting up vector identifications of languages, and instantiating the classes
             needed for integrating databases, imputing missing values, and querying the knowledge base.
-
-
-            Logging:
-                Info: Logs information when a file is missing in the `database` directory and copied from the original_uriel
-                directory.
-
-
-                Error: Logs an error if a file is not found in the original_uriel directory.
         """
         self.files = ["family_features.npz", "features.npz", "geocoord_features.npz", "script_features.npz"]
         self.cur_dir = os.path.dirname(os.path.abspath(__file__))
@@ -55,10 +46,23 @@ class URIELPlus(URIELPlusDatabases, URIELPlusImputation, URIELPlusQuerying):
                 try:
                     shutil.copy(old_file_path, file_path)
                 except FileNotFoundError:
-                    logging.error(f"{file} not found in \"original_uriel\".")
-                    sys.exit(1)
+                    raise FileNotFoundError(f"{file} not found in \"original_uriel\".")
             with np.load(file_path, allow_pickle=True) as l:
                 self.loaded_features.append(dict(l))
+
+
+        for index, matrix in enumerate(self.loaded_features):
+            if index == 2:  # geography
+                if not self._valid_geographic_data(matrix["data"]):
+                    raise ValueError(
+                        f"{self.files[index]}: geographic feature matrices may contain only -1 "
+                        "or finite values from 0 to 1"
+                    )
+            else:  # phylogeny, typological, script
+                if not self._valid_linguistic_data(matrix["data"]):
+                    raise ValueError(
+                        f"{self.files[index]}: linguistic feature matrices may contain only -1, 0, and 1"
+                    )
 
 
         self.feats = [l["feats"] for l in self.loaded_features]
@@ -66,13 +70,46 @@ class URIELPlus(URIELPlusDatabases, URIELPlusImputation, URIELPlusQuerying):
         self.data = [l["data"] for l in self.loaded_features]
         self.sources = [l["sources"] for l in self.loaded_features]
 
-        super().__init__(self.feats, self.langs, self.data, self.sources)
+        super().__init__(self.feats, self.langs, self.data, self.sources, codes="Glotto")
 
-        self.databases = URIELPlusDatabases(self.feats, self.langs, self.data, self.sources)
-        self.imputation = URIELPlusImputation(self.feats, self.langs, self.data, self.sources)
-        self.querying = URIELPlusQuerying(self.feats, self.langs, self.data, self.sources)
+        self.databases = self
+        self.imputation = self
+        self.querying = self
 
-        self.codes = self.get_codes()
+        self._refresh_indexes()
+
+
+    
+    @staticmethod
+    def _valid_linguistic_data(data):
+        """Returns True if every value in data is -1, 0, or 1."""
+        values = np.asarray(data)
+        if values.size == 0:
+            return True
+        return bool(np.all((values == -1) | (values == 0) | (values == 1)))
+
+
+    @staticmethod
+    def _valid_geographic_data(data):
+        """Returns True if every value in data is -1 or a finite value from 0 to 1."""
+        values = np.asarray(data)
+        if values.size == 0:
+            return True
+        return bool(np.all((values == -1) | (np.isfinite(values) & (values >= 0) & (values <= 1))))
+
+
+    def _refresh_indexes(self, matrix_index=None):
+        """Rebuilds name-to-position lookup tables for the given matrix, or all matrices if None."""
+        indexes = range(len(self.feats)) if matrix_index is None else (matrix_index,)
+        if matrix_index is None:
+            self._feature_index = [None] * len(self.feats)
+            self._language_index = [None] * len(self.langs)
+            self._source_index = [None] * len(self.sources)
+
+        for index in indexes:
+            self._feature_index[index] = {str(v): p for p, v in enumerate(self.feats[index])}
+            self._language_index[index] = {str(v): p for p, v in enumerate(self.langs[index])}
+            self._source_index[index] = {str(v): p for p, v in enumerate(self.sources[index])}
 
 
 
@@ -86,32 +123,31 @@ class URIELPlus(URIELPlusDatabases, URIELPlusImputation, URIELPlusQuerying):
 
             Args:
                 l_name (str): The name of the loaded features to return. Valid options are "phylogeny", "typological",
-                "geography", or "scriptural".
+                "geography", or "script".
 
 
             Returns:
                 np.ndarray: The corresponding loaded features as a NumPy array.
 
 
-            Logging:
-                Error: Logs an error if the provided loaded features name is invalid.
+            Raises:
+                KeyError: If the name is invalid.
            
         """
         l_map = {
             "phylogeny": self.loaded_features[0],
             "typological": self.loaded_features[1],
             "geography": self.loaded_features[2],
-            "scriptural": self.loaded_features[3],
+            "script": self.loaded_features[3],
         }
         if l_name in l_map:
             return l_map[l_name]
-        logging.error(f"Unknown loaded features: {l_name}. Valid loaded features are {list(l_map.keys())}.")
-        sys.exit(1)
+        raise KeyError(f"Unknown loaded features: {l_name}. Valid loaded features are {list(l_map.keys())}.")
 
 
     """
         The following three functions return loaded features representing phylogeny, typological, geography,
-        and scriptural vectors, respectively.
+        and script vectors, respectively.
 
 
         Returns:
@@ -129,8 +165,8 @@ class URIELPlus(URIELPlusDatabases, URIELPlusImputation, URIELPlusQuerying):
         """Returns the geography loaded features."""
         return self.loaded_features[2]
     
-    def get_scriptural_loaded_features(self):
-        """Returns the scriptural loaded features."""
+    def get_script_loaded_features(self):
+        """Returns the script loaded features."""
         return self.loaded_features[3]
    
 
@@ -142,12 +178,14 @@ class URIELPlus(URIELPlusDatabases, URIELPlusImputation, URIELPlusQuerying):
 
             Args:
                 l_name (str): The name of the loaded_features to update. Valid options are "phylogeny", "typological",
-                "geography", or "scriptural".
+                "geography", or "script".
                 file (str): The file name to load the loaded features data from.
 
 
-            Logging:
-                Error: Logs an error if the provided loaded features name is invalid or if the file loading fails.
+            Raises:
+                KeyError: If the name is invalid.
+                FileNotFoundError: If the file is missing.
+                ValueError: If the data fails validation.
 
 
         """
@@ -155,39 +193,38 @@ class URIELPlus(URIELPlusDatabases, URIELPlusImputation, URIELPlusQuerying):
             "phylogeny": 0,
             "typological": 1,
             "geography": 2,
-            "scriptural": 3,
+            "script": 3,
         }
+        if l_name not in l_map:
+            raise KeyError(f"Unknown loaded features: {l_name}. Valid loaded features are {list(l_map.keys())}.")
 
+        l_idx = l_map[l_name]
+        file_path = os.path.join(self.cur_dir, "database", file)
+        try:
+            with np.load(file_path, allow_pickle=True) as l:
+                matrix = dict(l)
+        except FileNotFoundError:
+            raise FileNotFoundError(f"File not found: {file_path}. Failed to update {l_name} loaded features.")
 
-        if l_name in l_map:
-            file_path = os.path.join(self.cur_dir, "database", file)
-           
-            try:
-                with np.load(file_path, allow_pickle=True) as l:
-                    l_idx = l_map[l_name]
-                    self.loaded_features[l_idx] = dict(l)
-                    self.feats[l_idx] = l["feats"]
-                    self.langs[l_idx] = l["langs"]
-                    self.data[l_idx] = l["data"]
-                    self.sources[l_idx] = l["sources"]
-                    self.files[l_idx] = file
-                    self.databases = URIELPlusDatabases(self.feats, self.langs, self.data, self.sources)
-                    self.imputation = URIELPlusImputation(self.feats, self.langs, self.data, self.sources)
-                    self.querying = URIELPlusQuerying(self.feats, self.langs, self.data, self.sources)
-                    logging.info(f"{l_name} loaded features updated successfully from {file}.")
-            except FileNotFoundError:
-                logging.error(f"File not found: {file_path}. Failed to update {l_name} loaded features.")
-                sys.exit(1)
-            except Exception as e:
-                logging.error(f"An error occurred while loading the file {file}: {e}")
-                sys.exit(1)
-        else:
-            logging.error(f"Unknown loaded features: {l_name}. Valid loaded features are {list(l_map.keys())}.")
-            sys.exit(1)
+        if l_idx == 2:
+            if not self._valid_geographic_data(matrix["data"]):
+                raise ValueError("geographic feature matrices may contain only -1 or finite values from 0 to 1")
+        elif not self._valid_linguistic_data(matrix["data"]):
+            raise ValueError("linguistic feature matrices may contain only -1, 0, and 1")
+
+        self.loaded_features[l_idx] = matrix
+        self.feats[l_idx] = matrix["feats"]
+        self.langs[l_idx] = matrix["langs"]
+        self.data[l_idx] = matrix["data"]
+        self.sources[l_idx] = matrix["sources"]
+        self.files[l_idx] = file
+        logging.info(f"{l_name} loaded features updated successfully from {file}.")
+
+        self._refresh_indexes(l_idx)
    
     """
         The following three functions updates loaded features representing phylogeny, typological, geography,
-        and scriptural vectors, respectively.
+        and script vectors, respectively.
 
 
         Args:
@@ -195,21 +232,21 @@ class URIELPlus(URIELPlusDatabases, URIELPlusImputation, URIELPlusQuerying):
     """    
     def set_phylogeny_loaded_features(self, file):
         """Updates the phylogeny loaded features."""
-        self.set_loaded_features(self, "phylogeny", file)
+        self.set_loaded_features("phylogeny", file)
 
 
     def set_typological_loaded_features(self, file):
         """Updates the typological loaded features."""
-        self.set_loaded_features(self, "typological", file)
+        self.set_loaded_features("typological", file)
 
 
     def set_geography_loaded_features(self, file):
         """Updates the geography loaded features."""
-        self.set_loaded_features(self, "geography", file)
+        self.set_loaded_features("geography", file)
 
-    def set_scriptural_loaded_features(self, file):
-        """Updates the scriptural loaded features."""
-        self.set_loaded_features(self, "scriptural", file)
+    def set_script_loaded_features(self, file):
+        """Updates the script loaded features."""
+        self.set_loaded_features("script", file)
    
 
 
@@ -223,7 +260,7 @@ class URIELPlus(URIELPlusDatabases, URIELPlusImputation, URIELPlusQuerying):
 
             Args:
                 l_name (str): The name of the loaded features to return. Valid options are "phylogeny", "typological",
-                "geography", or "scriptural".
+                "geography", or "script".
 
 
             Returns:
@@ -234,7 +271,7 @@ class URIELPlus(URIELPlusDatabases, URIELPlusImputation, URIELPlusQuerying):
    
     """
         The following three functions return all the arrays within loaded features representing
-        phylogeny, typological, geography, and scriptural vectors, respectively.
+        phylogeny, typological, geography, and script vectors, respectively.
 
 
         Returns:
@@ -252,9 +289,9 @@ class URIELPlus(URIELPlusDatabases, URIELPlusImputation, URIELPlusQuerying):
         """Returns the geography arrays."""
         return self.get_arrays("geography")
     
-    def get_scriptural_arrays(self):
-        """Returns the scriptural arrays."""
-        return self.get_arrays("scriptural")
+    def get_script_arrays(self):
+        """Returns the script arrays."""
+        return self.get_arrays("script")
 
 
 
@@ -307,8 +344,8 @@ class URIELPlus(URIELPlusDatabases, URIELPlusImputation, URIELPlusQuerying):
         """Returns the features array of the geography loaded features."""
         return self.feats[2]
     
-    def get_scriptural_features_array(self):
-        """Returns the features array of the scriptural loaded features."""
+    def get_script_features_array(self):
+        """Returns the features array of the script loaded features."""
         return self.feats[3]
    
     def get_phylogeny_languages_array(self):
@@ -323,8 +360,8 @@ class URIELPlus(URIELPlusDatabases, URIELPlusImputation, URIELPlusQuerying):
         """Returns the languages array of the geography loaded features."""
         return self.langs[2]
     
-    def get_scriptural_languages_array(self):
-        """Returns the languages array of the scriptural loaded features."""
+    def get_script_languages_array(self):
+        """Returns the languages array of the script loaded features."""
         return self.langs[3]
    
     def get_phylogeny_data_array(self):
@@ -339,8 +376,8 @@ class URIELPlus(URIELPlusDatabases, URIELPlusImputation, URIELPlusQuerying):
         """Returns the data array of the geography loaded features."""
         return self.data[2]
     
-    def get_scriptural_data_array(self):
-        """Returns the data array of the scriptural loaded features."""
+    def get_script_data_array(self):
+        """Returns the data array of the script loaded features."""
         return self.data[3]
    
     def get_phylogeny_sources_array(self):
@@ -355,92 +392,13 @@ class URIELPlus(URIELPlusDatabases, URIELPlusImputation, URIELPlusQuerying):
         """Returns the sources array of the geography loaded features."""
         return self.sources[2]
     
-    def get_scriptural_sources_array(self):
-        """Returns the sources array of the scriptural loaded features."""
+    def get_script_sources_array(self):
+        """Returns the sources array of the script loaded features."""
         return self.sources[3]
 
 
-
-
-    def query_yes_no(self, question, default="yes"):
-        """
-            Prompts the user with a yes/no question and returns their response.
-
-
-            Args:
-                question (str): The question to ask the user.
-                default (str): The default answer if the user just hits Enter. It must be "yes", "no", or None.
-
-
-            Returns:
-                bool: True if the user answered "yes"; False if the user answered "no".
-
-
-            Raises:
-                ValueError: If the default answer is not "yes", "no", or None.
-        """
-        valid = {"yes": True, "y": True, "ye": True,
-                "no": False, "n": False}
-        if default is None:
-            prompt = " [y/n] "
-        elif default == "yes":
-            prompt = " [Y/n] "
-        elif default == "no":
-            prompt = " [y/N] "
-        else:
-            logging.error("invalid default answer: '%s'" % default)
-            sys.exit(1)
-
-
-        while True:
-            sys.stdout.write(question + prompt)
-            choice = input().lower()
-            if default is not None and choice == '':
-                return valid[default]
-            elif choice in valid:
-                return valid[choice]
-            else:
-                sys.stdout.write("Please respond with \"yes\" or \"no\" "
-                                "(or 'y' or 'n').\n")
    
 
-
     def reset(self):
-        """
-            Restores the URIEL knowledge base by copying necessary files to the main data directory.
-
-
-            The function prompts if the user wants to revert to URIEL, and if yes, then moves all old data files back
-            to the main directory.
-        """
-        files_to_copy = ["family_features.npz",
-                         "features.npz", "geocoord_features.npz", "script_features.npz"]
-        cont = self.query_yes_no(f"Resetting to URIEL involves copying the files {files_to_copy} into the data directory. Any files with the same name will be replaced. Continue?")
-        if not cont:
-            return
-        for file in files_to_copy:
-            from_file_path = os.path.join(self.cur_dir, "database", "original_uriel", file)
-            to_file_path = os.path.join(self.cur_dir, "database", file)
-            try:
-                shutil.copy(from_file_path, to_file_path)
-            except Exception as e:
-                logging.error(f"Difficulty copying {from_file_path} to {to_file_path}: {e}")
-                sys.exit(1)
-        self.loaded_features = []
-        for file in self.files:
-            file_path = os.path.join(self.cur_dir, "database", file)
-            with np.load(file_path, allow_pickle=True) as l:
-                self.loaded_features.append(dict(l))
-
-
-        self.feats = [l["feats"] for l in self.loaded_features]
-        self.langs = [l["langs"] for l in self.loaded_features]
-        self.data = [l["data"] for l in self.loaded_features]
-        self.sources = [l["sources"] for l in self.loaded_features]
-
-
-        self.databases = URIELPlusDatabases(self.feats, self.langs, self.data, self.sources)
-        self.imputation = URIELPlusImputation(self.feats, self.langs, self.data, self.sources)
-        self.querying = URIELPlusQuerying(self.feats, self.langs, self.data, self.sources)
-
-        self.codes = "Iso"
+        """Restores URIEL+ to the released database, discarding in-memory changes."""
+        self.__init__()
