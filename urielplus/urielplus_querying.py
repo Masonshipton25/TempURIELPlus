@@ -4,36 +4,17 @@ import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-
 import numpy as np
 import pandas as pd
-
 
 from .base_uriel import BaseURIEL
 
 
 class URIELPlusQuerying(BaseURIEL):
-    def __init__(self, feats, langs, data, sources):
-        """
-            Initializes the Querying class, setting up vector identifications of languages with the constructor of the
-            BaseURIEL class.
-
-
-            Args:
-                feats (np.ndarray): The features of the four loaded features.
-                langs (np.ndarray): The languages of the four loaded features.
-                data (np.ndarray): The data of the four loaded features.
-                sources (np.ndarray): The sources of the four loaded features.
-        """
-        super().__init__(feats, langs, data, sources)
-
-
-
-
     @staticmethod
     def _known_values(values):
         """
-            Returns only the known values from an array of source values for a feature — excluding -1
+            Returns only the known values from an array of source values for a feature - excluding -1
             (unknown/missing), NaN, positive infinity, and negative infinity.
         """
         values = np.asarray(values, dtype=float)
@@ -67,7 +48,8 @@ class URIELPlusQuerying(BaseURIEL):
         if distance in d.keys():
             return d[distance]
         raise ValueError(f"{distance} is not an available feature category in URIEL+. Feature categories are {list(d.keys())}.")
-   
+
+
     def get_languages_with_distance_data(self, distance_type):
         """
             Retrieves a list of languages that contain at least one non-empty feature of the specified distance type.
@@ -88,11 +70,9 @@ class URIELPlusQuerying(BaseURIEL):
             if not np.all(np.isclose(flattened_data, -1.0)):
                 available_languages.append(self.langs[loaded_features_idx][lang_index])
 
-
         if distance_type in ["syntactic", "phonological", "inventory", "morphological"]:
             subdomain_languages = []
             languages_to_remove = available_languages.copy()
-
 
             for feature_index in range(len(self.feats[loaded_features_idx])):
                 feature_prefix = self.feats[loaded_features_idx][feature_index][:2]
@@ -103,7 +83,6 @@ class URIELPlusQuerying(BaseURIEL):
                     (distance_type == "morphological" and feature_prefix == "M_")
                 )
 
-
                 if is_matching_feature:
                     for lang_index in range(len(self.langs[loaded_features_idx])):
                         if self.langs[loaded_features_idx][lang_index] in languages_to_remove:
@@ -112,10 +91,10 @@ class URIELPlusQuerying(BaseURIEL):
                                 subdomain_languages.append(self.langs[loaded_features_idx][lang_index])
                                 languages_to_remove.remove(self.langs[loaded_features_idx][lang_index])
 
-
             return subdomain_languages
         return available_languages
-   
+
+
     """
         The next eight functions are used to retrieve a list of languages that contain at least one non-empty feature
         of the specified distance type.
@@ -181,14 +160,11 @@ class URIELPlusQuerying(BaseURIEL):
         else:
             langs = [l for l in args]
 
-
         loaded_features_idx = self.map_new_distance_to_loaded_features(category)
-
 
         for lang in langs:
             if lang not in self.langs[loaded_features_idx]:
                 raise ValueError(f"Unknown language: {lang}.")
-
 
         vectors = {}
         for lang in langs:
@@ -214,7 +190,8 @@ class URIELPlusQuerying(BaseURIEL):
                         vector.append(float(np.mean(known)) if known.size > 0 else -1.0)
             vectors[lang] = vector
         return vectors
-   
+
+
     """
         The next eight functions are used to retrieve the vectors of the specified category for each language.
 
@@ -276,15 +253,12 @@ class URIELPlusQuerying(BaseURIEL):
         if len(langs) > 2 and -1 in list_shared_indices[vec_num]:
             return []
 
-
         lang_index = np.where(languages == langs[i])[0][0]
         vec = []
-
 
         for feat_index in range(len(feats)):
             feat_data = feature_data[lang_index][feat_index]
             is_shared_index = (len(langs) > 2 and feat_index in list_shared_indices[vec_num]) or (len(langs) == 2 and feat_index in list_shared_indices)
-
 
             if is_shared_index:
                 if len(feat_data) == 1:
@@ -321,7 +295,6 @@ class URIELPlusQuerying(BaseURIEL):
         """
         lang_vectors = []
 
-
         with ThreadPoolExecutor() as executor:
             futures = [
                 executor.submit(
@@ -331,17 +304,15 @@ class URIELPlusQuerying(BaseURIEL):
                 for lang_index in range(len(langs))
             ]
 
-
             for future in futures:
                 lang_vectors.append(future.result())
-
 
         if len(langs) > 2:
             vec_num += len(langs)
 
-
         return (lang_vectors, vec_num) if len(langs) > 2 else lang_vectors
-   
+
+
     def _angular_distance(self, u, v):
         """
             Computes the angular or cosine distance between two vectors.
@@ -397,14 +368,12 @@ class URIELPlusQuerying(BaseURIEL):
         """
         start_time = time.time()
 
-
         if isinstance(distance, str):
             distance_list = [distance]
         elif isinstance(distance, list):
             distance_list = distance
         else:
             raise ValueError(f"Unknown distance type: {distance}. Provide a name (str) or a list of str.")
-
 
         if len(args) == 1 and not isinstance(args[0], list):
             raise ValueError("You only provided one language argument.\nProvide multiple language arguments, or a single list of languages as arguments.")
@@ -413,27 +382,21 @@ class URIELPlusQuerying(BaseURIEL):
         else:
             langs = list(args)
 
-
         unknown_langs = [lang for lang in langs if lang not in self.langs[0]]
         if unknown_langs:
             raise ValueError(f"Unknown languages: {', '.join(unknown_langs)}.")
-
 
         angular_distances_list = []
         for dist in distance_list:
             dist_start_time = time.time()
 
-
             loaded_features_idx = self.map_new_distance_to_loaded_features(dist)
-
 
             list_indices_with_data = []
             langs_no_info = []
 
-
             for lang in langs:
                 lang_index = np.where(self.langs[loaded_features_idx] == lang)[0][0]
-
 
                 indices_with_values = [
                     feat_index for feat_index, feat in enumerate(self.feats[loaded_features_idx]) if (dist in ["genetic", "featural", "geographic", "script"] or
@@ -443,16 +406,12 @@ class URIELPlusQuerying(BaseURIEL):
                                                                 (dist == "syntactic" and feat.startswith("S_"))) and not all(value == -1.0 for value in self.data[loaded_features_idx][lang_index][feat_index])
                 ]
 
-
                 list_indices_with_data.append(indices_with_values)
-
 
             list_shared_indices = []
 
-
             if len(langs) == 2:
                 shared_indices = list(set(list_indices_with_data[0]).intersection(list_indices_with_data[1]))
-
 
                 if len(shared_indices) == 0:
                     raise ValueError(f"No shared {dist} features between {langs[0]} and {langs[1]} for which the two languages have information.\nUnable to calculate {dist} distance.")
@@ -463,7 +422,6 @@ class URIELPlusQuerying(BaseURIEL):
                 if len(distance_list) == 1 and len(langs) == 2:
                     return angular_distance
                 angular_distances_list.append(angular_distance)
-
 
             else:
                 langs_no_shared_info = []
@@ -477,35 +435,28 @@ class URIELPlusQuerying(BaseURIEL):
                         else: list_shared_indices.append(shared_indices)
                         pairings[f"{langs[l_a]}-{langs[l_b]}"] = shared_indices
 
-
                 lang_vectors = []
                 vec_num = 0
                 for i in range(len(langs)):
                     vec, vec_num = self._create_vectors(langs, loaded_features_idx, list_shared_indices, dist, vec_num)
                     lang_vectors.append(vec)
 
-
                 flattened_lang_vectors = [sublist for group in lang_vectors for sublist in group]
-
 
                 indices_to_calculate_1 = []
                 indices_to_calculate_2 = []
 
-
                 pairings_keys_list = list(pairings.keys())
                 pair_index_map = {pair: idx for idx, pair in enumerate(pairings_keys_list)}
                 angular_distances = []
-
 
                 for pair in pairings_keys_list:
                     index = pair_index_map[pair]
                     reversed_pair = '-'.join(pair.split('-')[::-1])
                     index_2 = pair_index_map[reversed_pair] if pair != reversed_pair else index
 
-
                     indices_to_calculate_1.append(index)
                     indices_to_calculate_2.append(index_2)
-
 
                 for i, (index1, index2) in enumerate(zip(indices_to_calculate_1, indices_to_calculate_2)):
                     if len(flattened_lang_vectors[i]) == 0:
@@ -514,10 +465,8 @@ class URIELPlusQuerying(BaseURIEL):
                         dis = self._angular_distance(flattened_lang_vectors[index1], flattened_lang_vectors[index2])
                         angular_distances.append(dis)
 
-
                 array = np.array(angular_distances)
                 matrix = array.reshape((len(lang_vectors[0]), len(lang_vectors[0])))
-
 
                 if len(langs_no_info) > 0:
                     logging.info(f"No {dist} information for language(s) {str(langs_no_info)}. Their {dist} distance to other languages cannot be calculated.")
@@ -528,13 +477,13 @@ class URIELPlusQuerying(BaseURIEL):
                 angular_distances_list.append(matrix)
                 logging.info(f"In new_distance, calculating distances for {len(langs)} languages: {time.time() - dist_start_time} seconds")
 
-
         logging.info(f"Total time for new_distance: {time.time() - start_time} seconds")
 
         if(len(angular_distances_list) == 1):
             return angular_distances_list[0]
         return angular_distances_list
-   
+
+
     """
         The next eight functions are used to compute specific distances between languages.
 
@@ -581,10 +530,7 @@ class URIELPlusQuerying(BaseURIEL):
 
     def _resolve_custom_feature_index(self, idx):
         """
-            Maps a flattened custom-feature index (as produced by concatenating self.feats in the order
-            genetic, geographic, typological, script) back to the matrix it came from and its position
-            within that matrix's own feature array. Replaces the old fixed numeric offsets, which broke
-            whenever a matrix's feature count changed between releases.
+            Maps a flattened custom-feature index back to the matrix it came from and its position within that matrix's own feature array.
 
             Returns:
                 tuple: (matrix_index, local_feature_index)
@@ -681,7 +627,8 @@ class URIELPlusQuerying(BaseURIEL):
             vec_num += len(langs)
 
         return (lang_vectors, vec_num) if len(langs) > 2 else lang_vectors
-   
+
+
     def new_custom_distance(self, features, *args, source = 'A'):
         """
             Computes the distance between languages based on provided features.
@@ -709,7 +656,6 @@ class URIELPlusQuerying(BaseURIEL):
         if source != 'A' and source not in self.sources[1]:
             raise ValueError(f"Unknown typological source: {source}. Valid typological sources are {self.sources[1]}.")
 
-
         source_dict = {
             "ETHNO": ["S_", "P_", "INV_"],
             "WALS": ["S_", "P_"],
@@ -727,7 +673,6 @@ class URIELPlusQuerying(BaseURIEL):
             "EWAVE": ["S_", "M_"]
         }
 
-
         #If the UPDATED_SAPHON database has been integrated, replaces the PHOIBLE_SAPHON source with UPDATED_SAPHON.
         new_source_dict = {}
         if "UPDATED_SAPHON" in self.sources[1]:
@@ -738,7 +683,6 @@ class URIELPlusQuerying(BaseURIEL):
                     new_source_dict[key] = value
         else:
             new_source_dict = source_dict
-
 
         if not isinstance(features, list):
             raise ValueError(f"Unknown features type {features}. Provide a list of str.")
@@ -762,7 +706,6 @@ class URIELPlusQuerying(BaseURIEL):
                     source_num = np.where(self.sources[1] == source)[0][0]
             feat_indices.append(np.where(flattened_feats == feature)[0][0])
 
-
         if len(args) == 1 and not isinstance(args[0], list):
             raise ValueError("You only provided one language argument.\nProvide multiple language arguments, or a single list of languages as arguments.")
         if len(args) == 1 and isinstance(args[0], list):
@@ -770,17 +713,13 @@ class URIELPlusQuerying(BaseURIEL):
         else:
             langs = list(args)
 
-
         for lang in langs:
             if lang not in self.langs[0]:
                 raise ValueError(f"Unknown language: {lang}.")
    
-
-
         list_indices_with_data = []
         langs_no_info = []
-
-    
+ 
         for lang in langs:
             canCalculate = False
             indices_with_values = []
@@ -807,13 +746,10 @@ class URIELPlusQuerying(BaseURIEL):
                     continue
             list_indices_with_data.append(indices_with_values)
 
-
         list_shared_indices = []
-
 
         if len(langs) == 2:
             shared_indices = list(set(list_indices_with_data[0]).intersection(list_indices_with_data[1]))
-
 
             if len(shared_indices) == 0:
                 raise ValueError(f"No shared inputted features between {langs[0]} and {langs[1]} for which the two languages have information.\nUnable to calculate customized distance.")
@@ -834,34 +770,28 @@ class URIELPlusQuerying(BaseURIEL):
                     else: list_shared_indices.append(shared_indices)
                     pairings[f"{langs[l_a]}-{langs[l_b]}"] = shared_indices
 
-
             lang_vectors = []
             vec_num = 0
             for i in range(len(langs)):
                 vec, vec_num = self._create_custom_vectors(langs, flattened_feats, list_shared_indices, source_num, vec_num)
                 lang_vectors.append(vec)
 
-
             flattened_lang_vectors = [sublist for group in lang_vectors for sublist in group]
    
             indices_to_calculate_1 = []
             indices_to_calculate_2 = []
 
-
             pairings_keys_list = list(pairings.keys())
             pair_index_map = {pair: idx for idx, pair in enumerate(pairings_keys_list)}
             angular_distances = []
-
 
             for pair in pairings_keys_list:
                 index = pair_index_map[pair]
                 reversed_pair = '-'.join(pair.split('-')[::-1])
                 index_2 = pair_index_map[reversed_pair] if pair != reversed_pair else index
 
-
                 indices_to_calculate_1.append(index)
                 indices_to_calculate_2.append(index_2)
-
 
             for i, (index1, index2) in enumerate(zip(indices_to_calculate_1, indices_to_calculate_2)):
                 if len(flattened_lang_vectors[i]) == 0:
@@ -870,10 +800,8 @@ class URIELPlusQuerying(BaseURIEL):
                     dis = self._angular_distance(flattened_lang_vectors[index1], flattened_lang_vectors[index2])
                     angular_distances.append(dis)
 
-
             array = np.array(angular_distances)
             matrix = array.reshape((len(lang_vectors[0]), len(lang_vectors[0])))
-
 
             if len(langs_no_info) > 0:
                 logging.info(f"No inputted feature information for language(s) {str(langs_no_info)}. Their customized distance to other languages cannot be calculated.")
@@ -887,6 +815,16 @@ class URIELPlusQuerying(BaseURIEL):
 
        
     def _load_resource_lists(self):
+        """
+            Loads the language resource-level lists used for feature coverage reporting.
+
+            This function reads "resource_languages.json", which groups languages by resource level
+            (e.g. "high-resource", "medium-resource", "low-resource") for use by feature_coverage() and
+            all_feature_coverage().
+
+            Returns:
+                dict: A dictionary mapping each resource level to a list of language codes.
+        """
         json_path = os.path.join(self.cur_dir, "database", "urielplus_csvs", "resource_languages.json")
         with open(json_path, encoding='utf-8') as f:
             return json.load(f)
@@ -978,7 +916,6 @@ class URIELPlusQuerying(BaseURIEL):
             feature_data = self.data[loaded_features]
             lang_index = np.where(self.langs[loaded_features] == lang)[0][0]
 
-
             if distance_type == "syntactic":
                 feat_mask = [feat[:2] == "S_" for feat in feats]
             elif distance_type == "phonological":
@@ -990,12 +927,8 @@ class URIELPlusQuerying(BaseURIEL):
             else:
                 feat_mask = [True] * len(feats)
 
-
             feats = [feat for i, feat in enumerate(feats) if feat_mask[i]]
             feature_data = feature_data[:, feat_mask, :]
-
-
-
 
             agreement = []
             for i in range(len(feats)):
@@ -1009,11 +942,9 @@ class URIELPlusQuerying(BaseURIEL):
                     consensus = data.count(most_common_value) / len(data)
                     agreement.append(consensus)
 
-
             average_agreement = sum(agreement) / len(agreement) if len(
                 agreement) > 0 else 0
             return average_agreement
-
 
         agreement1 = check_agreement(lang1, distance_type)
         agreement2 = check_agreement(lang2, distance_type)
@@ -1026,7 +957,6 @@ class URIELPlusQuerying(BaseURIEL):
             feature_data = self.data[loaded_features_idx]
             lang_index = np.where(self.langs[loaded_features_idx] == lang)[0][0]
 
-
             if distance_type == "syntactic":
                 feat_mask = [feat[:2] == "S_" for feat in feats]
             elif distance_type == "phonological":
@@ -1038,11 +968,9 @@ class URIELPlusQuerying(BaseURIEL):
             else:
                 feat_mask = [True] * len(feats)
 
-
             # Apply the mask to filter features
             feats = [feat for i, feat in enumerate(feats) if feat_mask[i]]
             feature_data = feature_data[:, feat_mask, :]
-
 
             # Compute the proportion of missing values (-1) for each feature
             missing_value_proportions = []
@@ -1052,7 +980,6 @@ class URIELPlusQuerying(BaseURIEL):
                 missing_count = total - len(self._known_values(data))
                 missing_value_proportions.append(missing_count / total if total > 0 else 0)
 
-
             # Average the missing value proportions across all features
             average_missing_value_proportion = (
                 sum(missing_value_proportions) / len(missing_value_proportions)
@@ -1060,21 +987,17 @@ class URIELPlusQuerying(BaseURIEL):
                 else 0
             )
 
-
             return average_missing_value_proportion
-
 
         missing_values1 = check_missing_values(lang1, distance_type)
         missing_values2 = check_missing_values(lang2, distance_type)
         missing_values_score = 1 - ((missing_values1 + missing_values2) / 2)
-
 
         if imputed:
             file_path = os.path.join(self.cur_dir, "database", "imputation_metrics.csv")
             imputation_metrics = pd.read_csv(file_path)
             imputation_accuracy = float(imputation_metrics["accuracy"][0])
             imputation_score = imputation_accuracy
-
 
         if imputed:
             return agreement_score, imputation_score
@@ -1111,10 +1034,8 @@ class URIELPlusQuerying(BaseURIEL):
                     consensus = data.count(most_common_value) / len(data)
                     agreement.append(consensus)
 
-
             average_agreement = sum(agreement) / len(agreement) if len(agreement) > 0 else 0
             return average_agreement
-
 
         agreement1 = check_agreement(lang1, distance_type)
         agreement2 = check_agreement(lang2, distance_type)
@@ -1125,7 +1046,6 @@ class URIELPlusQuerying(BaseURIEL):
             loaded_features_idx = self.map_new_distance_to_loaded_features(distance_type)
             lang_index = np.where(self.langs[loaded_features_idx] == lang)[0][0]
 
-
             # Compute the proportion of missing values (-1) for each feature
             missing_value_proportions = []
             for i in range(len(self.feats[loaded_features_idx])):
@@ -1134,7 +1054,6 @@ class URIELPlusQuerying(BaseURIEL):
                 missing_count = total - len(self._known_values(data))
                 missing_value_proportions.append(missing_count / total if total > 0 else 0)
 
-
             # Average the missing value proportions across all features
             average_missing_value_proportion = (
                 sum(missing_value_proportions) / len(missing_value_proportions)
@@ -1142,14 +1061,11 @@ class URIELPlusQuerying(BaseURIEL):
                 else 0
             )
 
-
             return average_missing_value_proportion
-
 
         missing_values1 = check_missing_values(lang1, distance_type)
         missing_values2 = check_missing_values(lang2, distance_type)
         missing_values_score = 1 - ((missing_values1 + missing_values2) / 2)
-
 
         return agreement_score, missing_values_score
 

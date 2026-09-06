@@ -2,11 +2,9 @@ from .urielplus_databases import URIELPlusDatabases
 from .urielplus_imputation import URIELPlusImputation
 from .urielplus_querying import URIELPlusQuerying
 
-
 import logging
 import os
 import shutil
-
 
 import numpy as np
 
@@ -21,7 +19,7 @@ URIEL+ library for integrating new and updated databases into URIEL and robust d
 Contributors: Aditya Khan (adityakhan@cs.toronto.edu), Mason Shipton (masonshipton25@gmail.com), York Hay Ng (york.ng@mail.utoronto.ca), David Anugraha (anugraha@cs.toronto.edu), Kaiyao Duan (davidduan04@gmail.com), Phuong H. Hoang (fiona.hoang@mail.utoronto.ca), Eric Khiu (erickhiu@umich.edu), Xiang Lu (jameslx@umich.edu), A. Seza Doğruöz (as.dogruoz@ugent.be), En-Shiun Annie Lee (annie.lee@ontariotechu.ca)
 
 
-Last modified: September 3, 2026
+Last modified: September 6, 2026
 '''
 
 
@@ -35,12 +33,10 @@ class URIELPlus(URIELPlusDatabases, URIELPlusImputation, URIELPlusQuerying):
         self.cur_dir = os.path.dirname(os.path.abspath(__file__))
         self.loaded_features  = []
 
-
         for file in self.files:
             file_path = os.path.join(self.cur_dir, "database", file)
             if not os.path.isfile(file_path):
                 logging.info(f"{file_path} is missing in \"database\". Copying from \"original_uriel\"...")
-
 
                 old_file_path = os.path.join(self.cur_dir, "database", "original_uriel", file)
                 try:
@@ -49,7 +45,6 @@ class URIELPlus(URIELPlusDatabases, URIELPlusImputation, URIELPlusQuerying):
                     raise FileNotFoundError(f"{file} not found in \"original_uriel\".")
             with np.load(file_path, allow_pickle=True) as l:
                 self.loaded_features.append(dict(l))
-
 
         for index, matrix in enumerate(self.loaded_features):
             if index == 2:  # geography
@@ -64,13 +59,12 @@ class URIELPlus(URIELPlusDatabases, URIELPlusImputation, URIELPlusQuerying):
                         f"{self.files[index]}: linguistic feature matrices may contain only -1, 0, and 1"
                     )
 
-
         self.feats = [l["feats"] for l in self.loaded_features]
         self.langs = [l["langs"] for l in self.loaded_features]
         self.data = [l["data"] for l in self.loaded_features]
         self.sources = [l["sources"] for l in self.loaded_features]
 
-        super().__init__(self.feats, self.langs, self.data, self.sources, codes="Glotto")
+        super().__init__(self.feats, self.langs, self.data, self.sources)
 
         self.databases = self
         self.imputation = self
@@ -110,6 +104,19 @@ class URIELPlus(URIELPlusDatabases, URIELPlusImputation, URIELPlusQuerying):
             self._feature_index[index] = {str(v): p for p, v in enumerate(self.feats[index])}
             self._language_index[index] = {str(v): p for p, v in enumerate(self.langs[index])}
             self._source_index[index] = {str(v): p for p, v in enumerate(self.sources[index])}
+
+
+    def _sync_loaded_features(self, matrix_index=None):
+        """Keeps database loaded_features in sync with feats, langs, data, and sources for the provided matrix, or all four matrices if None."""
+        indexes = range(len(self.loaded_features)) if matrix_index is None else (matrix_index,)
+        for index in indexes:
+            matrix = self.loaded_features[index]
+            matrix.update(
+                feats=self.feats[index],
+                langs=self.langs[index],
+                data=self.data[index],
+                sources=self.sources[index],
+            )
 
 
 

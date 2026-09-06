@@ -1,7 +1,6 @@
 import logging
 import os
 
-
 import numpy as np
 import pandas as pd
 
@@ -44,12 +43,10 @@ class BaseURIEL:
 
         self.cur_dir = os.path.dirname(os.path.abspath(__file__))
 
-
         self.feats = feats
         self.langs = langs
         self.data = data
         self.sources = sources
-
 
         if codes is not None:
             if codes not in ("Iso", "Glotto"):
@@ -99,6 +96,7 @@ class BaseURIEL:
                 str: 'U' if aggregation is union, 'A' if aggregation is average.
         """
         return self.aggregation
+
    
     def set_aggregation(self, aggregation):
         """
@@ -157,7 +155,8 @@ class BaseURIEL:
                 str: The distance metric to use for distance calculations.
         """
         return self.distance_metric
-   
+
+
     def set_distance_metric(self, distance_metric):
         """
             Sets the distance metric to use for distance calculations.
@@ -246,24 +245,21 @@ class BaseURIEL:
         """
         if self.codes == "Glotto":
             raise ValueError("Already using Glottocodes.")
-
-        
-
+    
         logging.info("Converting ISO 639-3 codes to Glottocodes....")
-
 
         csv_path = os.path.join(self.cur_dir, "database", "urielplus_csvs", "uriel_glottocode_map.csv")
         # keep_default_na=False preserves the literal ISO code "nan" (Min Nan Chinese) instead of letting
         # pandas silently convert it to a real NaN during parsing.
         map_df = pd.read_csv(csv_path, dtype=str, keep_default_na=False, na_filter=False)
-
+        map_df["iso_code"] = map_df["iso_code"].str.strip()
+        map_df["glottocode"] = map_df["glottocode"].str.strip()
+        map_df = map_df[(map_df["iso_code"] != "") & (map_df["glottocode"] != "")]
 
         if map_df["iso_code"].duplicated().any():
             raise ValueError("uriel_glottocode_map.csv contains a duplicate iso_code entry.")
 
-
         mapping = dict(zip(map_df["iso_code"], map_df["glottocode"]))
-
 
         for i, file in enumerate(self.files):
             mapped = [mapping.get(str(lang)) for lang in self.langs[i]]
@@ -278,9 +274,7 @@ class BaseURIEL:
 
         logging.info("Conversion to Glottocodes complete.")
 
-
         self.codes = "Glotto"
-
 
         if hasattr(self, "_sync_loaded_features"):
             self._sync_loaded_features()

@@ -4,32 +4,13 @@ import math
 import os
 import re
 
-
 import numpy as np
 import pandas as pd
-
 
 from .base_uriel import BaseURIEL
 
 
 class URIELPlusDatabases(BaseURIEL):
-    def __init__(self, feats, langs, data, sources):
-        """
-            Initializes the Databases class, setting up vector identifications of languages with the constructor of the
-            BaseURIEL class.
-
-
-            Args:
-                feats (np.ndarray): The features of the three loaded features.
-                langs (np.ndarray): The languages of the three loaded features.
-                data (np.ndarray): The data of the three loaded features.
-                sources (np.ndarray): The sources of the three loaded features.
-        """
-        super().__init__(feats, langs, data, sources)
-
-
-
-
     def _get_new_features(self, feats, columns):
         """
             Identifies and returns the new features to URIEL+.
@@ -45,7 +26,8 @@ class URIELPlusDatabases(BaseURIEL):
         """
         featlist = feats.tolist()
         return [feat for feat in columns if feat not in featlist]
-   
+
+
     def _get_new_languages(self, langs, data, column):
         """
             Identifies and returns the new languages to URIEL+.
@@ -62,7 +44,8 @@ class URIELPlusDatabases(BaseURIEL):
         """
         langlist = langs.tolist()
         return [lang for lang in data[column] if lang not in langlist]
-   
+
+
     def _set_new_data_dimensions(self, data, new_feats, new_langs, new_sources):
         """
             Expands the URIEL+ data array to accommodate new features, languages, and sources, initializing new values
@@ -85,7 +68,8 @@ class URIELPlusDatabases(BaseURIEL):
         )
         new_data[:data.shape[0], :data.shape[1], :data.shape[2]] = data
         return new_data
-   
+
+
     def is_database_incorporated(self, database):
         """
             Checks if a specific database has already been integrated into URIEL+.
@@ -111,7 +95,6 @@ class URIELPlusDatabases(BaseURIEL):
         fam_geo_feat_csv = pd.read_csv(csv_path)
         fam_geo_feat_csv.columns = fam_geo_feat_csv.columns.str.strip('"')
 
-
         # If a language has more than one row (e.g. minn1241), keep the one with the longer/deeper lineage.
         fam_geo_feat_csv["_depth"] = fam_geo_feat_csv["lineage"].fillna("").apply(
             lambda value: len([part for part in str(value).split(",") if part.strip()])
@@ -120,9 +103,7 @@ class URIELPlusDatabases(BaseURIEL):
             ["language_id", "_depth"], ascending=[True, False], kind="stable"
         ).drop_duplicates("language_id", keep="first")
 
-
         new_langs = np.setdiff1d(self.langs[1], self.langs[0])
-
 
         for l in new_langs:
             row = fam_geo_feat_csv.loc[fam_geo_feat_csv["language_id"] == l]
@@ -158,7 +139,6 @@ class URIELPlusDatabases(BaseURIEL):
 
         if self.cache:
             np.savez(os.path.join(self.cur_dir, "database", self.files[0]), feats=self.feats[0], data=self.data[0], langs=self.langs[0], sources=self.sources[0])
-
 
         self._sync_loaded_features(0)
         self._refresh_indexes(0)
@@ -234,7 +214,6 @@ class URIELPlusDatabases(BaseURIEL):
         if self.cache:
             np.savez(os.path.join(self.cur_dir, "database", self.files[2]), feats=self.feats[2], data=self.data[2], langs=self.langs[2], sources=self.sources[2])
 
-
         self._sync_loaded_features(2)
         self._refresh_indexes(2)
 
@@ -245,31 +224,35 @@ class URIELPlusDatabases(BaseURIEL):
 
             If caching is enabled, updates the `script_features.npz` file.
         """
+        csv_path = os.path.join(self.cur_dir, "database", "urielplus_csvs", "script_data.csv")
+        script_csv = pd.read_csv(csv_path)
+        script_csv.columns = script_csv.columns.str.strip('"')
+        script_csv['language_id'] = script_csv['language_id'].str.strip('"')
+
+        script_feat_cols = [col for col in script_csv.columns if col not in ['language_id', 'language_name']]
+
+        missing_feats = [f for f in script_feat_cols if f not in self.feats[3]]
+        if missing_feats:
+            self.data[3] = self._set_new_data_dimensions(self.data[3], missing_feats, [], [])
+            self.feats[3] = np.append(self.feats[3], missing_feats)
+
         new_langs = np.setdiff1d(self.langs[1], self.langs[3])
         self.langs[3] = np.append(self.langs[3], new_langs)
         self.data[3] = self._set_new_data_dimensions(self.data[3], [], new_langs, [])
 
-        csv_path = os.path.join(self.cur_dir, "database", "urielplus_csvs", "script_data.csv")
-        script_csv = pd.read_csv(csv_path)
-        script_csv.columns = script_csv.columns.str.strip('"')
-        script_csv['language_id'] = script_csv['language_id'].str.strip('"') 
-
-        script_feat_cols = [col for col in script_csv.columns if col not in ['language_id', 'language_name']]
+        feat_position = {str(f): idx for idx, f in enumerate(self.feats[3])}
 
         for i, lang in enumerate(new_langs):
             lang_row = script_csv.loc[script_csv['language_id'] == lang]
+            new_lang_idx = -len(new_langs) + i
 
-            if lang_row.empty:
-                self.data[3][-len(new_langs) + i, :, -1] = -1.0
-            else:
-                features = lang_row[script_feat_cols].values.astype(np.float32)
-                if features.ndim == 1:
-                    features = features.reshape(1, -1, 1)
-                self.data[3][-len(new_langs) + i, :, -1] = features
-    
+            self.data[3][new_lang_idx, :, -1] = -1.0
+            if not lang_row.empty:
+                for col in script_feat_cols:
+                    self.data[3][new_lang_idx, feat_position[col], -1] = float(lang_row[col].values[0])
+
         if self.cache:
             np.savez(os.path.join(self.cur_dir, "database", self.files[3]), feats=self.feats[3], data=self.data[3], langs=self.langs[3], sources=self.sources[3])
-
 
         self._sync_loaded_features(3)
         self._refresh_indexes(3)
@@ -317,6 +300,20 @@ class URIELPlusDatabases(BaseURIEL):
 
             If caching is enabled, updates the "features.npz" file.
         """
+        REDUNDANT_TYPOLOGICAL_FEATURES = (
+            # Full S/O/V order
+            "S_SOV", "S_SVO", "S_OVS", "S_VSO", "S_OSV", "S_VOS",
+            # APiCS A/V/O order
+            "S_VAO", "S_AOV", "S_AVO", "S_OVA", "S_OAV", "S_VOA",
+            # Voiced vs. voiceless consonants
+            "P_VOICED_PLOSIVES", "P_VOICED_FRICATIVES",
+            # Uvular consonants
+            "P_UVULAR_STOPS", "P_UVULAR_CONTINUANTS",
+            # Ambiguous possessor identifiers, including duplicate-column artifacts
+            "S_POSSESSOR_BEFORE_NOUN", "S_POSSESSOR_BEFORE_NOUN.1",
+            "S_POSSESSOR_AFTER_NOUN", "S_POSSESSOR_AFTER_NOUN.1",
+        )
+
         self._ensure_feature_mappings()
 
         derived_index = self._get_or_create_derived_source()
@@ -326,7 +323,7 @@ class URIELPlusDatabases(BaseURIEL):
 
         # --- Exact collapse: three-valued OR across named operand features, over every real source ---
         for record in self.feature_mappings:
-            if record.get("database") != "URIELPLUS" or record.get("relationship") != "exact_collapse":
+            if record.get("relationship") != "exact_collapse":
                 continue
             operands = [item["id"] for item in record.get("source_features", ())]
             targets = [t for t in record.get("targets", ()) if t.get("matrix") == "typological"]
@@ -385,10 +382,14 @@ class URIELPlusDatabases(BaseURIEL):
             if not changed:
                 break
 
+        redundant_mask = np.isin(self.feats[1], REDUNDANT_TYPOLOGICAL_FEATURES)
+        if redundant_mask.any():
+            self.feats[1] = self.feats[1][~redundant_mask]
+            self.data[1] = self.data[1][:, ~redundant_mask, :]
+
         if self.cache:
             np.savez(os.path.join(self.cur_dir, "database", self.files[1]),
                     feats=self.feats[1], data=self.data[1], langs=self.langs[1], sources=self.sources[1])
-
 
         self._sync_loaded_features(1)
         self._refresh_indexes(1)
@@ -411,18 +412,13 @@ class URIELPlusDatabases(BaseURIEL):
             logging.info("UPDATED_SAPHON already integrated; skipping.")
             return
 
-
         logging.info("Importing updated SAPHON from \"saphon_data.csv\"....")
-
 
         saphon_data = pd.read_csv(os.path.join(self.cur_dir, "database", "urielplus_csvs", "saphon_data.csv"))
 
-
         code_col = "iso_code" if (self.codes == "Iso" and not convert_glottocodes_param) else "glottocode"
 
-
         source_index = np.where(self.sources[1] == "PHOIBLE_SAPHON")
-
 
         for i, lang in enumerate(saphon_data[code_col]):
             if not pd.isna(lang):
@@ -433,11 +429,9 @@ class URIELPlusDatabases(BaseURIEL):
 
         self.sources[1][source_index] = "UPDATED_SAPHON"
 
-
         if self.cache:
             np.savez(os.path.join(self.cur_dir, "database", self.files[1]),
                      feats=self.feats[1], data=self.data[1], langs=self.langs[1], sources=self.sources[1])
-
 
         logging.info("Updated SAPHON integration complete..")
 
@@ -454,24 +448,18 @@ class URIELPlusDatabases(BaseURIEL):
             logging.info("BDPROTO already integrated; skipping.")
             return
 
-
         logging.info("Importing BDPROTO from \"bdproto_data.csv\"....")
-
 
         if self.codes == "Iso":
             self.set_glottocodes()
 
-
         bdproto_data = pd.read_csv(os.path.join(self.cur_dir, "database", "urielplus_csvs", "bdproto_data.csv"))
-
 
         new_langs = self._get_new_languages(self.langs[1], bdproto_data, "language_id")
         new_source = "BDPROTO"
 
-
         old_num_langs = self.data[1].shape[0]
         self.data[1] = self._set_new_data_dimensions(self.data[1], [], new_langs, [new_source])
-
 
         new_langs_added = 0
         for i, lang in enumerate(bdproto_data["language_id"]):
@@ -490,20 +478,16 @@ class URIELPlusDatabases(BaseURIEL):
         self.langs[1] = np.append(self.langs[1], np.array(new_langs).flatten())
         self.sources[1] = np.append(self.sources[1], new_source)
 
-
         if self.cache:
             np.savez(os.path.join(self.cur_dir, "database", self.files[1]),
                      feats=self.feats[1], data=self.data[1], langs=self.langs[1], sources=self.sources[1])
             
-
         self._calculate_phylogeny_vectors()
         self._calculate_geocoord_vectors()
         self._calculate_script_vectors()
 
-
         self._sync_loaded_features(1)
         self._refresh_indexes(1)
-
 
         logging.info("BDPROTO integration complete.")
 
@@ -522,29 +506,21 @@ class URIELPlusDatabases(BaseURIEL):
 
         self._ensure_feature_mappings()
 
-
         logging.info("Importing Grambank from \"grambank_data.csv\"....")
-
-  
 
         if self.codes == "Iso":
             self.set_glottocodes()
 
-
         grambank_data = pd.read_csv(os.path.join(self.cur_dir, "database", "urielplus_csvs", "grambank_data.csv"))
-
 
         new_feats = self._get_new_features(self.feats[1], grambank_data.columns[1:])
         new_langs = self._get_new_languages(self.langs[1], grambank_data, "language_id")
         new_source = "GRAMBANK"
 
-
         old_num_langs = self.data[1].shape[0]
         self.data[1] = self._set_new_data_dimensions(self.data[1], new_feats, new_langs, [new_source])
 
-
         self.feats[1] = np.append(self.feats[1], new_feats)
-
 
         new_langs_added = 0
         for i, lang in enumerate(grambank_data["language_id"]):
@@ -563,19 +539,15 @@ class URIELPlusDatabases(BaseURIEL):
         self.langs[1] = np.append(self.langs[1], np.array(new_langs).flatten())
         self.sources[1] = np.append(self.sources[1], new_source)
 
-
         if self.cache:
             np.savez(os.path.join(self.cur_dir, "database", self.files[1]),
                      feats=self.feats[1], data=self.data[1], langs=self.langs[1], sources=self.sources[1])
             
-
         self._calculate_phylogeny_vectors()
         self._calculate_geocoord_vectors()
         self._calculate_script_vectors()
 
-
         self.inferred_features()
-
 
         logging.info("Grambank integration complete.")
 
@@ -594,35 +566,25 @@ class URIELPlusDatabases(BaseURIEL):
         
         self._ensure_feature_mappings()
 
-
         logging.info("Importing APiCS from \"apics_data.csv\"....")
-
 
         if self.codes == "Iso":
             self.set_glottocodes()
 
-
         apics_data = pd.read_csv(os.path.join(self.cur_dir, "database", "urielplus_csvs", "apics_data.csv"))
-
 
         new_langs = self._get_new_languages(self.langs[1], apics_data, "language_id")
 
-
         apics_data = apics_data[["language_id"] + [col for col in apics_data.columns if col != "language_id"]]
-
 
         new_feats = self._get_new_features(self.feats[1], apics_data.columns[1:])
 
-
         new_source = "APICS"
-
 
         old_num_langs = self.data[1].shape[0]
         self.data[1] = self._set_new_data_dimensions(self.data[1], new_feats, new_langs, [new_source])
 
-
         self.feats[1] = np.append(self.feats[1], new_feats)
-
 
         new_langs_added = 0
         for i, lang in enumerate(apics_data["language_id"]):
@@ -638,24 +600,19 @@ class URIELPlusDatabases(BaseURIEL):
             for feat in apics_data.columns[1:]:
                 feat_index = np.where(self.feats[1] == feat)
 
-
                 self.data[1][lang_index, feat_index, -1] = apics_data[feat][i]
         self.langs[1] = np.append(self.langs[1], np.array(new_langs).flatten())
         self.sources[1] = np.append(self.sources[1], new_source)
-
 
         if self.cache:
             np.savez(os.path.join(self.cur_dir, "database", self.files[1]),
                      feats=self.feats[1], data=self.data[1], langs=self.langs[1], sources=self.sources[1])
 
-
         self._calculate_phylogeny_vectors()
         self._calculate_geocoord_vectors()
         self._calculate_script_vectors()
 
-
         self.inferred_features()
-
 
         logging.info("APiCS integration complete.")
 
@@ -674,28 +631,21 @@ class URIELPlusDatabases(BaseURIEL):
         
         self._ensure_feature_mappings()
 
-
         logging.info("Importing eWAVE from \"english_dialect_data.csv\"....")
-
 
         if self.codes == "Iso":
             self.set_glottocodes()
 
-
         df = pd.read_csv(os.path.join(os.path.join(self.cur_dir, "database", "urielplus_csvs", "english_dialect_data.csv")))
-
 
         new_langs = self._get_new_languages(self.langs[1], df, "language_id")
         new_feats = self._get_new_features(self.feats[1], df.columns[1:])
         new_source = "EWAVE"
 
-
         old_num_langs = self.data[1].shape[0]
         self.data[1] = self._set_new_data_dimensions(self.data[1], df.columns[1:], new_langs, [new_source])
 
-
         self.feats[1] = np.append(self.feats[1], new_feats)
-
 
         new_langs_added = 0
         for i, lang in enumerate(df["language_id"]):
@@ -714,44 +664,34 @@ class URIELPlusDatabases(BaseURIEL):
         self.langs[1] = np.append(self.langs[1], np.array(new_langs).flatten())
         self.sources[1] = np.append(self.sources[1], new_source)
 
-
         if self.cache:
             np.savez(os.path.join(self.cur_dir, "database", self.files[1]),
                      feats=self.feats[1], data=self.data[1], langs=self.langs[1], sources=self.sources[1])
-
 
         self._calculate_phylogeny_vectors()
         self._calculate_geocoord_vectors()
         self._calculate_script_vectors()
 
-
         self.inferred_features()
-
 
         logging.info("eWAVE integration complete.")
 
 
     def integrate_glottolog(self):
         """
-            Updates URIEL+ with additional dialect-level language entries from the Glottolog classification.
+            Updates URIEL+ with data from the Glottolog database.
 
-            "GLOTTOLOG" is already a baseline source in the released database, so its presence in
-            self.sources[1] does not indicate whether dialect expansion has happened — this function instead
-            checks "dialects.csv" directly for any Glottocodes not yet present in URIEL+'s language list, and
-            is a no-op if there are none.
+
+            This function integrates the Glottolog data.
         """
         logging.info("Importing Glottolog from \"dialects.csv\"....")
-
 
         if self.codes == "Iso":
             self.set_glottocodes()
         
-
         glottolog_data = pd.read_csv(os.path.join(self.cur_dir, "database", "urielplus_csvs", "dialects.csv"))
 
-
         code_cols = ['Language Glot', 'Dialect(s) Glot']
-
 
         new_langs = set()
 
@@ -763,29 +703,23 @@ class URIELPlusDatabases(BaseURIEL):
         existing_langs = set(self.langs[1]) if len(self.langs) > 1 else set()
         new_langs = sorted(new_langs - existing_langs)
 
-
         if not new_langs:
             logging.info("GLOTTOLOG dialects already integrated; skipping.")
             return
 
-
         self.data[1] = self._set_new_data_dimensions(self.data[1], [], new_langs, [])
         self.langs[1] = np.append(self.langs[1], np.array(new_langs).flatten())
         
-
         if self.cache:
             np.savez(os.path.join(self.cur_dir, "database", self.files[1]),
                      feats=self.feats[1], data=self.data[1], langs=self.langs[1], sources=self.sources[1])
-
 
         self._calculate_phylogeny_vectors()
         self._calculate_geocoord_vectors()
         self._calculate_script_vectors()
 
-
         self._sync_loaded_features(1)
         self._refresh_indexes(1)
-
 
         logging.info("Glottolog integration complete.")
 
@@ -795,7 +729,6 @@ class URIELPlusDatabases(BaseURIEL):
             Updates URIEL+ with data from all available databases (UPDATED_SAPHON, BDPROTO, GRAMBANK, APICS, EWAVE, GLOTTOLOG).
         """
         logging.info("Importing all databases....")
-
 
         databases = {
             "UPDATED_SAPHON": self.integrate_saphon,
@@ -811,7 +744,6 @@ class URIELPlusDatabases(BaseURIEL):
 
         self.integrate_glottolog()
         self.inferred_features()
-
 
         logging.info("All databases integration complete.")
 
@@ -830,12 +762,10 @@ class URIELPlusDatabases(BaseURIEL):
         """
         logging.info("Importing custom databases....")
 
-
         if len(args) == 1 and isinstance(args[0], list):
             databases = args[0]
         else:
             databases = list(args)
-
 
         valid_databases = {
             "UPDATED_SAPHON": self.integrate_saphon,
@@ -846,7 +776,6 @@ class URIELPlusDatabases(BaseURIEL):
             "GLOTTOLOG": self.integrate_glottolog,
             "INFERRED": self.inferred_features,
         }
-
 
         for db in databases:
             if db not in valid_databases:

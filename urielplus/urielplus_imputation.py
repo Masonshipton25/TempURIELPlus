@@ -4,41 +4,90 @@ import os
 import sys
 import collections
 
-
-import contexttimer
 import numpy as np
-import pandas as pd
-from fancyimpute import SoftImpute
-from joblib import Parallel, delayed
-from sklearn.impute import KNNImputer, SimpleImputer
-from sklearn.metrics import (accuracy_score, f1_score, mean_absolute_error,
-                             root_mean_squared_error, precision_score, recall_score)
-from sklearn.model_selection import KFold, train_test_split
-
 
 from .base_uriel import BaseURIEL
 
+pd = None
+contexttimer = None
+SoftImpute = Parallel = delayed = KNNImputer = SimpleImputer = None
+accuracy_score = f1_score = mean_absolute_error = root_mean_squared_error = None
+precision_score = recall_score = KFold = train_test_split = None
+
+
+def _load_pandas():
+    global pd
+    if pd is None:
+        import pandas as pandas_module
+        pd = pandas_module
+    return pd
+
+
+def _load_imputation_dependencies(strategy):
+    """
+        Lazily imports the heavy optional dependencies needed for a given imputation strategy, so that
+        importing URIELPlus and using its database or query methods never imports pandas, MIDASpy,
+        TensorFlow, TensorFlow Addons, fancyimpute, or scikit-learn.
+
+        Raises:
+            ImportError: If strategy is "midas" and running on Python 3.11 or later, or if a required
+            package for the requested strategy is not installed.
+    """
+    global contexttimer, SoftImpute, Parallel, delayed, KNNImputer, SimpleImputer
+    global accuracy_score, f1_score, mean_absolute_error, root_mean_squared_error
+    global precision_score, recall_score, KFold, train_test_split
+
+    if strategy == "midas" and sys.version_info >= (3, 11):
+        raise ImportError(
+            "MIDASpy imputation is available only on Python 3.10. "
+            "Install URIELPlus with the 'midaspy' extra in a Python 3.10 environment."
+        )
+    try:
+        _load_pandas()
+        import contexttimer as timer_module
+        from joblib import Parallel as joblib_parallel, delayed as joblib_delayed
+        from sklearn.impute import KNNImputer as sklearn_knn, SimpleImputer as sklearn_simple
+        from sklearn.metrics import (
+            accuracy_score as sklearn_accuracy, f1_score as sklearn_f1,
+            mean_absolute_error as sklearn_mae, precision_score as sklearn_precision,
+            recall_score as sklearn_recall, root_mean_squared_error as sklearn_rmse,
+        )
+        from sklearn.model_selection import KFold as sklearn_kfold, train_test_split as sklearn_split
+
+        soft_impute = None
+        if strategy == "softimpute":
+            from fancyimpute import SoftImpute as fancy_soft_impute
+            from sklearn.utils import check_array as sklearn_check_array
+            import inspect
+            if "force_all_finite" not in inspect.signature(sklearn_check_array).parameters:
+                import importlib
+                def compatible_check_array(*args, **kwargs):
+                    if "force_all_finite" in kwargs:
+                        kwargs["ensure_all_finite"] = kwargs.pop("force_all_finite")
+                    return sklearn_check_array(*args, **kwargs)
+                for module_name in ("fancyimpute.solver", "fancyimpute.soft_impute"):
+                    importlib.import_module(module_name).check_array = compatible_check_array
+            soft_impute = fancy_soft_impute
+
+        if strategy == "midas":
+            import MIDASpy  # noqa: F401 - validate the isolated extra before work begins
+    except ImportError as error:
+        extra = "midaspy" if strategy == "midas" else "imputation"
+        raise ImportError(
+            f"{strategy} imputation requires optional dependencies; install URIELPlus[{extra}]"
+        ) from error
+
+    contexttimer = timer_module
+    Parallel, delayed = joblib_parallel, joblib_delayed
+    KNNImputer, SimpleImputer = sklearn_knn, sklearn_simple
+    SoftImpute = soft_impute
+    accuracy_score, f1_score = sklearn_accuracy, sklearn_f1
+    mean_absolute_error, root_mean_squared_error = sklearn_mae, sklearn_rmse
+    precision_score, recall_score = sklearn_precision, sklearn_recall
+    KFold, train_test_split = sklearn_kfold, sklearn_split
+    
 
 class URIELPlusImputation(BaseURIEL):
-    def __init__(self, feats, langs, data, sources):
-        """
-            Initializes the Imputation class, setting up vector identifications of languages with the constructor of the
-            BaseURIEL class.
-
-
-            Args:
-                feats (np.ndarray): The features of the three loaded features.
-                langs (np.ndarray): The languages of the three loaded features.
-                data (np.ndarray): The data of the three loaded features.
-                sources (np.ndarray): The sources of the three loaded features.
-        """
-        super().__init__(feats, langs, data, sources)
-        self.lineage_imputed_indices = set()
-        self.include_lineage_in_eval = False
-
-
-
-
     def _geneticFill(self, parent_features, child_features):
         fill_mask = (child_features == -1.0) & (parent_features > -1.0)
         return np.where(fill_mask, parent_features, child_features)
@@ -319,8 +368,8 @@ class URIELPlusImputation(BaseURIEL):
                 dict: A dictionary containing evaluation metrics by feature type.
 
 
-            Logging:
-                Error: Logs error if any metric calculations results in errors.
+            Raises:
+                ValueError: If any metric calculations results in errors.
         """
         if lineage_imputed_indices:
             missing_indices = [(i, j) for (i, j) in missing_indices
@@ -355,8 +404,7 @@ class URIELPlusImputation(BaseURIEL):
                             "f1": f1
                         }
                 except Exception as e:
-                    logging.error(f"{e} for feature type {feature_type}")
-                    sys.exit(1)
+                    raise ValueError(f"{e} for feature type {feature_type}")
 
 
             else:
@@ -371,8 +419,7 @@ class URIELPlusImputation(BaseURIEL):
                             "mae": mae
                         }
                 except Exception as e:
-                    logging.error(f"{e} for feature type {feature_type}")
-                    sys.exit(1)
+                    raise ValueError(f"{e} for feature type {feature_type}")
         return feat_metrics
 
 
@@ -866,6 +913,7 @@ class URIELPlusImputation(BaseURIEL):
             Returns:
                 pd.DataFrame: The imputed data frame if return_csv is True; otherwise, None.
         """
+        _load_imputation_dependencies(strategy)
         logging.info("Starting imputation_interface")
 
 
