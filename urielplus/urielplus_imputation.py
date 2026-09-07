@@ -25,7 +25,7 @@ def _load_pandas():
 
 def _load_imputation_dependencies(strategy):
     """
-        Lazily imports the heavy optional dependencies needed for a given imputation strategy, so that
+        This function imports the heavy optional dependencies needed for a given imputation strategy, so that
         importing URIELPlus and using its database or query methods never imports pandas, MIDASpy,
         TensorFlow, TensorFlow Addons, fancyimpute, or scikit-learn.
 
@@ -127,7 +127,6 @@ class URIELPlusImputation(BaseURIEL):
                 self.sources[idx] = ["AVERAGE"]
                 file_name = f"{self.files[idx].replace('.npz', '')}_average.npz"
 
-
         if self.fill_with_base_lang:
             logging.info("Executing new BFS-based genetic imputation strategy...")
             self.dialects = self.get_dialects()
@@ -174,7 +173,6 @@ class URIELPlusImputation(BaseURIEL):
             aggregated_data = np.expand_dims(aggregated_data, axis=-1)
        
         self.data[idx] = aggregated_data
-
 
         if self.cache:
             np.savez(os.path.join(self.cur_dir, "database", file_name),
@@ -262,12 +260,10 @@ class URIELPlusImputation(BaseURIEL):
             logging.info(f"Length of orig is {len(orig)}")
             logging.info(f"Length of imputed is {len(imputed)}")
 
-
         overall_metrics = {}
         if self.aggregation == 'U':
             orig_rounded = [round(o) for o in orig]
             imputed_rounded = [round(imp) for imp in imputed]
-
 
             accuracy = accuracy_score(orig_rounded, imputed_rounded)
             classification_error = 1 - accuracy
@@ -275,13 +271,11 @@ class URIELPlusImputation(BaseURIEL):
             recall = recall_score(orig_rounded, imputed_rounded)
             f1 = f1_score(orig_rounded, imputed_rounded)
 
-
             overall_metrics["accuracy"] = accuracy
             overall_metrics["classification_error"] = classification_error
             overall_metrics["precision"] = precision
             overall_metrics["recall"] = recall
             overall_metrics["f"] = f1
-
 
             # Calculate differences in proportions of 1s for each feature
             feature_differences = {}
@@ -291,7 +285,6 @@ class URIELPlusImputation(BaseURIEL):
                 feature_differences[j]["orig"].append(orig_rounded[idx])
                 feature_differences[j]["imputed"].append(imputed_rounded[idx])
 
-
             proportion_diffs = []
             for feature, values in feature_differences.items():
                 orig_prop = np.mean(values["orig"])
@@ -299,29 +292,24 @@ class URIELPlusImputation(BaseURIEL):
                 proportion_diff = abs(orig_prop - imputed_prop)
                 proportion_diffs.append(proportion_diff)
 
-
             # Print the largest, average, and smallest differences in proportion
             if proportion_diffs:
                 largest_diff = max(proportion_diffs)
                 average_diff = np.mean(proportion_diffs)
                 smallest_diff = min(proportion_diffs)
 
-
                 logging.info(f"Largest difference in proportion: {largest_diff}")
                 logging.info(f"Average difference in proportion: {average_diff}")
                 logging.info(f"Smallest difference in proportion: {smallest_diff}")
-
 
                 overall_metrics["largest_diff"] = largest_diff
                 overall_metrics["average_diff"] = average_diff
                 overall_metrics["smallest_diff"] = smallest_diff
 
-
                 proportion_diffs_sorted = sorted(proportion_diffs)
                 q1 = np.percentile(proportion_diffs_sorted, 25)
                 q2 = np.percentile(proportion_diffs_sorted, 50)
                 q3 = np.percentile(proportion_diffs_sorted, 75)
-
 
                 quartile_counts = {
                     f"Q1 ({q1})": sum(diff <= q1 for diff in proportion_diffs),
@@ -331,22 +319,18 @@ class URIELPlusImputation(BaseURIEL):
                         diff > q3 for diff in proportion_diffs)
                 }
 
-
                 overall_metrics[f"Q1 ({q1})"] = quartile_counts[f"Q1 ({q1})"]
                 overall_metrics[f"Q2 ({q2})"] = quartile_counts[f"Q2 ({q2})"]
                 overall_metrics[f"Q3 ({q3})"] = quartile_counts[f"Q3 ({q3})"]
                 overall_metrics[f"Q4 ({np.max(proportion_diffs)})"] = \
                 quartile_counts[f"Q4 ({np.max(proportion_diffs)})"]
 
-
         elif self.aggregation == 'A':
             rmse = root_mean_squared_error(orig, imputed)
             mae = mean_absolute_error(orig, imputed)
 
-
             overall_metrics["rmse"] = rmse
             overall_metrics["mae"] = mae
-
 
         return overall_metrics
 
@@ -377,7 +361,6 @@ class URIELPlusImputation(BaseURIEL):
 
         feat_metrics = {key: {} for key in feature_types.keys()}
 
-
         for feature_type, indices in feature_types.items():
             orig = [X_test_orig[i][j] for i, j in missing_indices if j in indices]
             imputed = [X_test_imputed[i][j] for i, j in missing_indices if
@@ -388,13 +371,11 @@ class URIELPlusImputation(BaseURIEL):
                         orig_rounded = [round(o) for o in orig]
                         imputed_rounded = [round(imp) for imp in imputed]
 
-
                         accuracy = accuracy_score(orig_rounded, imputed_rounded)
                         classification_error = 1 - accuracy
                         precision = precision_score(orig_rounded, imputed_rounded)
                         recall = recall_score(orig_rounded, imputed_rounded)
                         f1 = f1_score(orig_rounded, imputed_rounded)
-
 
                         feat_metrics[feature_type] = {
                             "accuracy": accuracy,
@@ -405,7 +386,6 @@ class URIELPlusImputation(BaseURIEL):
                         }
                 except Exception as e:
                     raise ValueError(f"{e} for feature type {feature_type}")
-
 
             else:
                 try:
@@ -466,13 +446,11 @@ class URIELPlusImputation(BaseURIEL):
                                                                 lineage_imputed_indices=None if self.include_lineage_in_eval
                                                                 else self.lineage_imputed_indices)
 
-
         # print(f"Time taken for {strategy} with hyperparameter {hyperparameter}: {t.elapsed}")
         logging.info(
             f"Metrics for {strategy} with hyperparameter {hyperparameter}: {metrics}")
         logging.info(
             f"Feature metrics for {strategy} with hyperparameter {hyperparameter}: {feature_metrics}")
-
 
         return X_test_imputed, hyperparameter, metrics[eval_metric]
 
@@ -570,7 +548,6 @@ class URIELPlusImputation(BaseURIEL):
         elif eval_metric in ["rmse", "mae"]:
             best_hyperparameter = min(results, key=lambda x: x[2])[1]
 
-
         logging.info(f"Best hyperparameter for {strategy} is {best_hyperparameter}")
         return best_hyperparameter
 
@@ -601,7 +578,6 @@ class URIELPlusImputation(BaseURIEL):
         logging.info(f"X_missing shape: {X_test_missing.shape}")
         logging.info(f"Number of missing indices: {len(missing_indices)}")
 
-
         results = Parallel(n_jobs=-1)(
             delayed(self._impute_wrt_hyperparameter)(X_train, X_test, X_test_missing,
                                             missing_indices, strategy,
@@ -612,15 +588,12 @@ class URIELPlusImputation(BaseURIEL):
 
         logging.info("Completed parallel processing for hyperparameter selection")
 
-
         if eval_metric in ["accuracy", "precision", "recall", "f1"]:
             best_hyperparameter = max(results, key=lambda x: x[2])[1]
         elif eval_metric in ["rmse", "mae"]:
             best_hyperparameter = min(results, key=lambda x: x[2])[1]
 
-
         logging.info(f"Best hyperparameter for {strategy} is {best_hyperparameter}")
-
 
         return best_hyperparameter
 
@@ -694,7 +667,6 @@ class URIELPlusImputation(BaseURIEL):
                 X_imputed = imputations[0].to_numpy()
                 return X_imputed
 
-
             assert missing_indices is not None
             multiple_metrics = []
             multiple_feature_metrics = []
@@ -711,17 +683,14 @@ class URIELPlusImputation(BaseURIEL):
                 logging.info(f"Metrics for {strategy} with hyperparameter {hyperparameter} and imputed dataset sample {i}: {metrics}")
                 logging.info(f"Feature metrics for {strategy} with hyperparameter {hyperparameter} and imputed dataset sample {i}: {feature_metrics}")
 
-
             avg_metrics = {}
             for key in multiple_metrics[0].keys():
                 avg_metrics[key] = np.mean([multiple_metrics[i][key] for i in range(num_samples)])
-
 
             avg_feature_metrics = {key: {} for key in feature_types.keys()}
             for key in feature_types.keys():
                 for metric in multiple_feature_metrics[0][key].keys():
                     avg_feature_metrics[key][metric] = np.mean([multiple_feature_metrics[i][key].get(metric, np.nan) for i in range(num_samples)])
-
 
             logging.info(f"Average metrics for {strategy} with hyperparameter {hyperparameter} across each imputed dataset: {avg_metrics}")
             logging.info(f"Average feature metrics for {strategy} with hyperparameter {hyperparameter} across each imputed dataset: {avg_feature_metrics}")
@@ -731,7 +700,6 @@ class URIELPlusImputation(BaseURIEL):
                 metrics_df.to_csv(file_path, index=False)
             X_imputed = imputations[0].to_numpy()
             return X_imputed
-
 
         if X_missing is not None:
             with contexttimer.Timer() as t:
@@ -787,14 +755,12 @@ class URIELPlusImputation(BaseURIEL):
         X_train, X_test = train_test_split(X, test_size=0.25, random_state=0)
         logging.info(f"X_train shape: {X_train.shape}, X_test shape: {X_test.shape}")
 
-
         best_hyperparameter = self._choose_hyperparameter_cv(X_train, X_test,
                                                     strategy=strategy,
                                                     feature_types=feature_types,
                                                     missing_rate=0.2,
                                                     hyperparameter_range=hyperparameter_range,
                                                     eval_metric=eval_metric)
-
 
         imputer_class = KNNImputer if strategy == "knn" else SoftImpute
         if test_quality:
@@ -811,7 +777,6 @@ class URIELPlusImputation(BaseURIEL):
                                 hyperparameter=best_hyperparameter,
                                 feature_types=feature_types,
                                 missing_indices=missing_indices)
-
 
         X_imputed = self._standard_impute(X=X, imputer_class=imputer_class,
                                     strategy=strategy,
@@ -862,7 +827,6 @@ class URIELPlusImputation(BaseURIEL):
         else:
             raise ValueError(f"Unknown file: {file}")
 
-
         if ["imputed"] not in self.sources[idx] and self.cache:
             updated_path = os.path.join(file_path_to_save_npz, "non_imputed_data")
             os.makedirs(updated_path, exist_ok=True)
@@ -872,9 +836,7 @@ class URIELPlusImputation(BaseURIEL):
                     langs=self.langs[idx],
                     sources=self.sources[idx])
         
-
         aggregate_data = self.aggregate(idx)
-
 
         combined_df = pd.DataFrame(aggregate_data.squeeze(), columns=self.feats[idx])
         combined_df.insert(0, "language", self.langs[idx])
@@ -916,10 +878,8 @@ class URIELPlusImputation(BaseURIEL):
         _load_imputation_dependencies(strategy)
         logging.info("Starting imputation_interface")
 
-
         if file_path_to_save_npz == None:
             file_path_to_save_npz = os.path.join(self.cur_dir, "database")
-
 
         if csv_path is None:
             combined_df_u = self._make_csv(file_path_to_save_npz, file=file)
@@ -933,10 +893,8 @@ class URIELPlusImputation(BaseURIEL):
                 updated_path = os.path.join(file_path_to_save_npz, "non_imputed_data")
                 np.savez(os.path.join(updated_path, file), data=f["data"], feats=f["feats"], langs=f["langs"], sources=f_sources)
 
-
         old_combined_df_u = combined_df_u.copy()
         combined_df_u = combined_df_u.drop(combined_df_u.columns[0], axis=1)
-
 
         X, feature_types = self._preprocess_data(combined_df_u, feature_prefixes)
         if strategy in ["knn", "softimpute"] and hyperparameter_range is not None:
@@ -984,10 +942,8 @@ class URIELPlusImputation(BaseURIEL):
                                         feature_types=feature_types,
                                         file_path_to_save_npz=file_path_to_save_npz)
 
-
         if self.aggregation == 'U':
             imputed = np.round(imputed)
-
 
         if save_as_npz:
             df = pd.DataFrame(imputed, columns=combined_df_u.columns)
@@ -1001,17 +957,14 @@ class URIELPlusImputation(BaseURIEL):
             file_path = os.path.join(file_path_to_save_npz, self.files[idx])
             self.data[idx] = reshaped_data
 
-
             if self.cache:
                 np.savez(file_path,
                         data=reshaped_data, feats=feats,
                         langs=old_combined_df_u["language"], sources=f_sources_new)
 
-
         if return_csv:
             completed_df = pd.DataFrame(imputed, columns=combined_df_u.columns)
             completed_df.insert(0, "language", old_combined_df_u["language"])
-
 
             return completed_df
 
