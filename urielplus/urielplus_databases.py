@@ -289,6 +289,62 @@ class URIELPlusDatabases(BaseURIEL):
             self.feature_mappings = self._load_feature_mappings()
 
 
+    def _feature_inclusion_map(self, database, columns):
+        """
+            Determines whether each raw column belonging to a database should become its own public
+            typological feature, according to "feature_mappings.json".
+
+
+            Args:
+                database (str): The name of the database whose columns are being checked (e.g. "GRAMBANK").
+                columns (list): The raw column names to check, exactly as they appear in the source CSV.
+
+
+            Returns:
+                dict: A mapping from each column name to True (disposition "represented", becomes its own
+                feature) or False (disposition "collapsed_into" or "not_represented", excluded — either
+                because it only feeds a separate exact_collapse target computed by inferred_features(), or
+                because it maps to no public feature at all).
+
+
+            Raises:
+                ValueError: If a column is undocumented, a documented column is not present in columns, a
+                column is documented more than once with conflicting dispositions, or a column is
+                documented with a disposition other than "represented", "collapsed_into", or
+                "not_represented".
+        """
+        self._ensure_feature_mappings()
+
+        column_dispositions = {}
+        for record in self.feature_mappings:
+            if record.get("database") != database:
+                continue
+            disposition = record.get("disposition")
+            for column in record.get("bundled_columns", ()):
+                if disposition not in ("represented", "collapsed_into", "not_represented"):
+                    raise ValueError(
+                        f"{database} column {column!r} is documented with an unsupported disposition: {disposition!r}."
+                    )
+                existing = column_dispositions.get(column)
+                if existing is not None and existing != disposition:
+                    raise ValueError(
+                        f"{database} column {column!r} is documented with conflicting dispositions."
+                    )
+                column_dispositions[column] = disposition
+
+        documented = set(column_dispositions)
+        provided = set(columns)
+        if documented != provided:
+            undocumented = sorted(provided - documented)
+            unmatched = sorted(documented - provided)
+            raise ValueError(
+                f"{database} mappings must document every bundled feature column exactly once. "
+                f"Undocumented columns: {undocumented}. Documented columns not present in the source: {unmatched}."
+            )
+
+        return {column: disposition == "represented" for column, disposition in column_dispositions.items()}
+
+
     def inferred_features(self):
         """
             Consolidates typological features according to "feature_mappings.json". Exact-collapse rules combine
@@ -300,20 +356,6 @@ class URIELPlusDatabases(BaseURIEL):
 
             If caching is enabled, updates the "features.npz" file.
         """
-        REDUNDANT_TYPOLOGICAL_FEATURES = (
-            # Full S/O/V order
-            "S_SOV", "S_SVO", "S_OVS", "S_VSO", "S_OSV", "S_VOS",
-            # APiCS A/V/O order
-            "S_VAO", "S_AOV", "S_AVO", "S_OVA", "S_OAV", "S_VOA",
-            # Voiced vs. voiceless consonants
-            "P_VOICED_PLOSIVES", "P_VOICED_FRICATIVES",
-            # Uvular consonants
-            "P_UVULAR_STOPS", "P_UVULAR_CONTINUANTS",
-            # Ambiguous possessor identifiers, including duplicate-column artifacts
-            "S_POSSESSOR_BEFORE_NOUN", "S_POSSESSOR_BEFORE_NOUN.1",
-            "S_POSSESSOR_AFTER_NOUN", "S_POSSESSOR_AFTER_NOUN.1",
-        )
-
         self._ensure_feature_mappings()
 
         derived_index = self._get_or_create_derived_source()
@@ -381,11 +423,8 @@ class URIELPlusDatabases(BaseURIEL):
                     changed = True
             if not changed:
                 break
-
-        redundant_mask = np.isin(self.feats[1], REDUNDANT_TYPOLOGICAL_FEATURES)
-        if redundant_mask.any():
-            self.feats[1] = self.feats[1][~redundant_mask]
-            self.data[1] = self.data[1][:, ~redundant_mask, :]
+        else:
+            raise ValueError("typological positive-implication rules did not reach a fixed point.")
 
         if self.cache:
             np.savez(os.path.join(self.cur_dir, "database", self.files[1]),
@@ -513,7 +552,10 @@ class URIELPlusDatabases(BaseURIEL):
 
         grambank_data = pd.read_csv(os.path.join(self.cur_dir, "database", "urielplus_csvs", "grambank_data.csv"))
 
-        new_feats = self._get_new_features(self.feats[1], grambank_data.columns[1:])
+        inclusion = self._feature_inclusion_map("GRAMBANK", list(grambank_data.columns[1:]))
+        included_columns = [col for col in grambank_data.columns[1:] if inclusion[col]]
+
+        new_feats = self._get_new_features(self.feats[1], included_columns)
         new_langs = self._get_new_languages(self.langs[1], grambank_data, "language_id")
         new_source = "GRAMBANK"
 
@@ -577,7 +619,10 @@ class URIELPlusDatabases(BaseURIEL):
 
         apics_data = apics_data[["language_id"] + [col for col in apics_data.columns if col != "language_id"]]
 
-        new_feats = self._get_new_features(self.feats[1], apics_data.columns[1:])
+        inclusion = self._feature_inclusion_map("APICS", list(apics_data.columns[1:]))
+        included_columns = [col for col in apics_data.columns[1:] if inclusion[col]]
+
+        new_feats = self._get_new_features(self.feats[1], included_columns)
 
         new_source = "APICS"
 
@@ -638,12 +683,15 @@ class URIELPlusDatabases(BaseURIEL):
 
         df = pd.read_csv(os.path.join(os.path.join(self.cur_dir, "database", "urielplus_csvs", "english_dialect_data.csv")))
 
+        inclusion = self._feature_inclusion_map("EWAVE", list(df.columns[1:]))
+        included_columns = [col for col in df.columns[1:] if inclusion[col]]
+
         new_langs = self._get_new_languages(self.langs[1], df, "language_id")
-        new_feats = self._get_new_features(self.feats[1], df.columns[1:])
+        new_feats = self._get_new_features(self.feats[1], included_columns)
         new_source = "EWAVE"
 
         old_num_langs = self.data[1].shape[0]
-        self.data[1] = self._set_new_data_dimensions(self.data[1], df.columns[1:], new_langs, [new_source])
+        self.data[1] = self._set_new_data_dimensions(self.data[1], new_feats, new_langs, [new_source])
 
         self.feats[1] = np.append(self.feats[1], new_feats)
 
@@ -742,7 +790,7 @@ class URIELPlusDatabases(BaseURIEL):
             if not self.is_database_incorporated(db):
                 integrate_method()
 
-        self.integrate_glottolog()
+        # self.integrate_glottolog()
         self.inferred_features()
 
         logging.info("All databases integration complete.")
