@@ -319,6 +319,17 @@ class URIELPlusDatabases(BaseURIEL):
         for record in self.feature_mappings:
             if record.get("database") != database:
                 continue
+
+            # Ignore historical bundled conversion column mappings.
+            if any(
+                source_feature.get("namespace") in (
+                    "urielplus_v1_bundled_conversion_column",
+                    "removed_urielplus_operand",
+                )
+                for source_feature in record.get("source_features", ())
+            ):
+                continue
+            
             disposition = record.get("disposition")
             for column in record.get("bundled_columns", ()):
                 if disposition not in ("represented", "collapsed_into", "not_represented"):
@@ -343,6 +354,34 @@ class URIELPlusDatabases(BaseURIEL):
             )
 
         return {column: disposition == "represented" for column, disposition in column_dispositions.items()}
+
+
+    def _removed_operand_features(self):
+        """
+            Returns the set of typological feature names that should never remain as their own standalone
+            public feature, according to "feature_mappings.json". This covers three cases:
+            (1) features explicitly tagged with the "removed_urielplus_operand" namespace (operands consumed
+            by an exact-collapse computation into "DERIVED");
+            (2) bundled columns documented with disposition "not_represented" (columns that map to no
+            public feature at all); and
+            (3) bundled columns documented only via the historical "urielplus_v1_bundled_conversion_column"
+            namespace (old, pre-split v1 column names that may still be present in the released baseline
+            data, even though the source CSVs no longer produce them).
+
+
+            Returns:
+                set: The feature names to purge from self.feats[1]/self.data[1].
+        """
+        self._ensure_feature_mappings()
+        removed = set()
+        for record in self.feature_mappings:
+            for source_feature in record.get("source_features", ()):
+                if source_feature.get("namespace") == "removed_urielplus_operand":
+                    removed.add(source_feature["id"])
+
+            if record.get("disposition") == "not_represented":
+                removed.update(record.get("bundled_columns", ()))
+        return removed
 
 
     def inferred_features(self):
@@ -425,6 +464,12 @@ class URIELPlusDatabases(BaseURIEL):
                 break
         else:
             raise ValueError("typological positive-implication rules did not reach a fixed point.")
+
+        removed_operands = self._removed_operand_features()
+        redundant_mask = np.isin(self.feats[1], list(removed_operands))
+        if redundant_mask.any():
+            self.feats[1] = self.feats[1][~redundant_mask]
+            self.data[1] = self.data[1][:, ~redundant_mask, :]
 
         if self.cache:
             np.savez(os.path.join(self.cur_dir, "database", self.files[1]),
@@ -732,7 +777,7 @@ class URIELPlusDatabases(BaseURIEL):
 
             This function integrates the Glottolog data.
         """
-        logging.info("Importing Glottolog from \"dialects.csv\"....")
+        logging.info("Importing Glottolog from \"dialects.csv\". This may take a while....")
 
         if self.codes == "Iso":
             self.set_glottocodes()
@@ -790,7 +835,7 @@ class URIELPlusDatabases(BaseURIEL):
             if not self.is_database_incorporated(db):
                 integrate_method()
 
-        # self.integrate_glottolog()
+        self.integrate_glottolog()
         self.inferred_features()
 
         logging.info("All databases integration complete.")

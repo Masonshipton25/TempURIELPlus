@@ -35,7 +35,6 @@
 - Added `_load_feature_mappings`/`_ensure_feature_mappings`
 - Added `_get_or_create_derived_source`
 - Added `inferred_features` (exact-collapse three-valued OR + positive-implication fixpoint propagation into "DERIVED" source)
-- Added `_move_derived_to_end`
 - Added hardcoded redundant-feature purge list, applied in `inferred_features` (**THIS NEEDS TO BE CHANGED**)
 - Replaced `sys.exit(1)` with raised exceptions throughout
 - Added `_sync_loaded_features`/`_refresh_indexes` calls to all functions that reassign feature/language/source arrays

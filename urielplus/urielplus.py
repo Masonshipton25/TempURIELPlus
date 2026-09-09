@@ -19,7 +19,7 @@ URIEL+ library for integrating new and updated databases into URIEL and robust d
 Contributors: Aditya Khan (adityakhan@cs.toronto.edu), Mason Shipton (masonshipton25@gmail.com), York Hay Ng (york.ng@mail.utoronto.ca), David Anugraha (anugraha@cs.toronto.edu), Kaiyao Duan (davidduan04@gmail.com), Phuong H. Hoang (fiona.hoang@mail.utoronto.ca), Eric Khiu (erickhiu@umich.edu), Xiang Lu (jameslx@umich.edu), A. Seza Doğruöz (as.dogruoz@ugent.be), En-Shiun Annie Lee (annie.lee@ontariotechu.ca)
 
 
-Last modified: September 6, 2026
+Last modified: September 8, 2026
 '''
 
 

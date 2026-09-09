@@ -66079,6 +66079,59 @@
       {
         "namespace": "apics_parameter",
         "id": "3",
+        "name": "Order of possessor and noun"
+      }
+    ],
+    "bundled_columns": [
+      "S_POSSESSOR_BEFORE_NOUN",
+      "S_POSSESSOR_AFTER_NOUN"
+    ],
+    "targets": [
+      {
+        "matrix": "typological",
+        "feature_id": "S_POSSESSOR_BEFORE_NOUN",
+        "storage_source": "APICS",
+        "expression": "column(S_POSSESSOR_BEFORE_NOUN)"
+      },
+      {
+        "matrix": "typological",
+        "feature_id": "S_POSSESSOR_AFTER_NOUN",
+        "storage_source": "APICS",
+        "expression": "column(S_POSSESSOR_AFTER_NOUN)"
+      }
+    ],
+    "relationship": "one_to_many",
+    "disposition": "represented",
+    "transformation": {
+      "type": "native_code_to_binary_columns",
+      "source_code_cases": [
+        {
+          "source_code_id": "2-1",
+          "source_code_name": "Modifying possessor precedes noun",
+          "column_values": {
+            "S_POSSESSOR_BEFORE_NOUN": 1,
+            "S_POSSESSOR_AFTER_NOUN": 0
+          }
+        },
+        {
+          "source_code_id": "2-2",
+          "source_code_name": "Modifying possessor follows noun",
+          "column_values": {
+            "S_POSSESSOR_BEFORE_NOUN": 0,
+            "S_POSSESSOR_AFTER_NOUN": 1
+          }
+        }
+      ],
+      "combination_rule": "For a multivalued parameter, take the maximum case value for each column. If no source code is available, every column is -1."
+    }
+  },
+  {
+    "database": "APICS",
+    "source_layer": "APICS",
+    "source_features": [
+      {
+        "namespace": "apics_parameter",
+        "id": "3",
         "name": "Order of adjective and noun"
       }
     ],
@@ -73692,7 +73745,7 @@
       "type": "native_code_to_binary_columns",
       "source_code_cases": [
         {
-          "source_code_id": "2-1",
+          "source_code_id": "4-1",
           "source_code_name": "Possessor-possessum",
           "column_values": {
             "S_NOMINAL_POSSESSOR_BEFORE_NOUN": 1,
@@ -73700,7 +73753,7 @@
           }
         },
         {
-          "source_code_id": "2-2",
+          "source_code_id": "4-2",
           "source_code_name": "Possessum-possessor",
           "column_values": {
             "S_NOMINAL_POSSESSOR_BEFORE_NOUN": 0,

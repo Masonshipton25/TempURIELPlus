@@ -28,12 +28,18 @@ class BaseURIEL:
             codes (str): Whether to identify languages with Iso 639-3 codes (Iso) or Glottocodes (Glotto).
             Defaults to "Iso".
             NOTE: Once set to "Glotto", codes cannot be changed back to "Iso" unless URIEL+ is reset.
+
+
+            include_lineage_in_eval (bool): Whether values filled in via parent language (lineage) data during
+            imputation are included when evaluating imputation quality.
+            Defaults to False.
     """
     cache = False
     aggregation = 'U'
     fill_with_base_lang = True
     distance_metric = "angular"
     codes = 'Iso'
+    include_lineage_in_eval = False
 
 
     def __init__(self, feats, langs, data, sources, codes=None):
@@ -47,6 +53,8 @@ class BaseURIEL:
         self.langs = langs
         self.data = data
         self.sources = sources
+
+        self.lineage_imputed_indices = set()
 
         if codes is not None:
             if codes not in ("Iso", "Glotto"):
@@ -228,6 +236,64 @@ class BaseURIEL:
             str: 'Iso' if codes is Iso 639-3 codes, 'Glotto' if codes is Glottocodes.
         """
         return self.codes
+
+
+    def get_lineage_imputed_indices(self):
+        """
+            Returns the set of language indices whose values were filled in using parent language (lineage)
+            data during the most recent imputation run.
+
+
+            Returns:
+                set: The indices of languages filled in via lineage-based imputation.
+        """
+        return self.lineage_imputed_indices
+
+
+    def set_lineage_imputed_indices(self, lineage_imputed_indices):
+        """
+            Sets the set of language indices whose values were filled in using parent language (lineage) data.
+
+
+            Args:
+                lineage_imputed_indices (set): The indices of languages filled in via lineage-based imputation.
+
+            Raises:
+                ValueError: If the provided value is not a set.
+        """
+        if not isinstance(lineage_imputed_indices, set):
+            raise ValueError(f"Invalid set value: {lineage_imputed_indices}. Must be a set.")
+        self.lineage_imputed_indices = lineage_imputed_indices
+
+
+    def get_include_lineage_in_eval(self):
+        """
+            Returns whether values filled in via parent language (lineage) data are included when
+            evaluating imputation quality.
+
+
+            Returns:
+                bool: True if lineage-imputed values are included in evaluation, False otherwise.
+        """
+        return self.include_lineage_in_eval
+
+
+    def set_include_lineage_in_eval(self, include_lineage_in_eval):
+        """
+            Sets whether values filled in via parent language (lineage) data are included when evaluating
+            imputation quality.
+
+
+            Args:
+                include_lineage_in_eval (bool): True to include lineage-imputed values in evaluation, False
+                otherwise.
+
+            Raises:
+                ValueError: If the provided value is not a valid boolean value (True or False).
+        """
+        if not isinstance(include_lineage_in_eval, bool):
+            raise ValueError(f"Invalid boolean value: {include_lineage_in_eval}. Valid boolean values are True and False.")
+        self.include_lineage_in_eval = include_lineage_in_eval
         
 
 
