@@ -11,24 +11,19 @@ class BaseURIEL:
             cache (bool): Whether to cache distance languages and changes to databases.
             Defaults to False.
 
-
             aggregation (str): Whether to perform a union ('U') or average ('A') operation on data for aggregation and distance
             calculations.
             Defaults to 'U'.
 
-
             fill_with_base_lang (bool): Whether to fill missing values during aggregation using parent language data.
             Defaults to False.
-
 
             distance_metric (str): The distance metric to use for distance calculations ("angular" or "cosine").
             Defaults to "angular".
 
-
             codes (str): Whether to identify languages with Iso 639-3 codes (Iso) or Glottocodes (Glotto).
             Defaults to "Iso".
             NOTE: Once set to "Glotto", codes cannot be changed back to "Iso" unless URIEL+ is reset.
-
 
             include_lineage_in_eval (bool): Whether values filled in via parent language (lineage) data during
             imputation are included when evaluating imputation quality.
@@ -45,7 +40,6 @@ class BaseURIEL:
     def __init__(self, feats, langs, data, sources, codes=None):
         #Files of language phylogenetic, typological, geographical, and script vectors, respectively.
         self.files = ["family_features.npz", "features.npz", "geocoord_features.npz", "script_features.npz"]
-
 
         self.cur_dir = os.path.dirname(os.path.abspath(__file__))
 

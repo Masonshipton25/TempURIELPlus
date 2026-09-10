@@ -95,23 +95,16 @@ class URIELPlusDatabases(BaseURIEL):
         fam_geo_feat_csv = pd.read_csv(csv_path)
         fam_geo_feat_csv.columns = fam_geo_feat_csv.columns.str.strip('"')
 
-        # If a language has more than one row (e.g. minn1241), keep the one with the longer/deeper lineage.
-        fam_geo_feat_csv["_depth"] = fam_geo_feat_csv["lineage"].fillna("").apply(
-            lambda value: len([part for part in str(value).split(",") if part.strip()])
-        )
-        fam_geo_feat_csv = fam_geo_feat_csv.sort_values(
-            ["language_id", "_depth"], ascending=[True, False], kind="stable"
-        ).drop_duplicates("language_id", keep="first")
-
         new_langs = np.setdiff1d(self.langs[1], self.langs[0])
 
-        for l in new_langs:
+        # Work out each new language's lineage path (if any) and collect every brand-new path-qualified feature name across the whole batch, without touching any array yet.
+        existing_feats = set(self.feats[0].tolist())
+        lang_paths = [None] * len(new_langs)
+        new_feature_order = []
+        seen_new_features = set()
+
+        for i, l in enumerate(new_langs):
             row = fam_geo_feat_csv.loc[fam_geo_feat_csv["language_id"] == l]
-
-            self.data[0] = np.vstack([self.data[0], -1.0 * np.ones((1, self.data[0].shape[1], self.data[0].shape[2]))])
-            self.langs[0] = np.append(self.langs[0], l)
-            new_lang_idx = np.where(self.langs[0] == l)[0]
-
             if row.empty:
                 continue
 
@@ -123,18 +116,37 @@ class URIELPlusDatabases(BaseURIEL):
             if not parts:
                 continue
 
-            # Every existing family node is known to be absent for this language unless proven present below.
-            self.data[0][new_lang_idx, :, -1] = 0.0
-
+            path_features = []
             path = []
             for part in parts:
                 path.append(part)
                 fam_string = "F_" + " > ".join(path)
-                family_idx = np.where(self.feats[0] == fam_string)[0]
-                if len(family_idx) == 0:
-                    self.data[0] = self._set_new_data_dimensions(self.data[0], [fam_string], [], [])
-                    self.feats[0] = np.append(self.feats[0], fam_string)
-                    family_idx = np.array([len(self.feats[0]) - 1])
+                path_features.append(fam_string)
+                if fam_string not in existing_feats and fam_string not in seen_new_features:
+                    seen_new_features.add(fam_string)
+                    new_feature_order.append(fam_string)
+
+            lang_paths[i] = path_features
+
+        # Batch-resize once, for every new language row and every new feature column together.
+        self.data[0] = self._set_new_data_dimensions(self.data[0], new_feature_order, list(new_langs), [])
+        self.feats[0] = np.append(self.feats[0], new_feature_order)
+        self.langs[0] = np.append(self.langs[0], new_langs)
+
+        feature_position = {str(feat): idx for idx, feat in enumerate(self.feats[0])}
+
+        # Fill in values now that the array is already at its final shape. ---
+        for i, path_features in enumerate(lang_paths):
+            if path_features is None:
+                continue  # no usable lineage; row stays at the default -1 (unknown) for every feature
+
+            new_lang_idx = -len(new_langs) + i
+
+            # Every existing family node is known to be absent for this language unless proven present below.
+            self.data[0][new_lang_idx, :, -1] = 0.0
+
+            for fam_string in path_features:
+                family_idx = feature_position[fam_string]
                 self.data[0][new_lang_idx, family_idx, -1] = 1.0
 
         if self.cache:
@@ -770,53 +782,331 @@ class URIELPlusDatabases(BaseURIEL):
         logging.info("eWAVE integration complete.")
 
 
+    # def integrate_glottolog(self):
+    #     """
+    #         Updates URIEL+ with data from the Glottolog database.
+
+
+    #         This function integrates the Glottolog data.
+    #     """
+    #     logging.info("Importing Glottolog from \"dialects.csv\". This may take a while....")
+
+    #     if self.codes == "Iso":
+    #         self.set_glottocodes()
+        
+    #     glottolog_data = pd.read_csv(os.path.join(self.cur_dir, "database", "urielplus_csvs", "dialects.csv"))
+
+    #     code_cols = ['Language Glot', 'Dialect(s) Glot']
+
+    #     new_langs = set()
+
+    #     for col in code_cols:
+    #         for entry in glottolog_data[col].dropna():
+    #             parts = [code.strip() for code in entry.split(',') if code.strip()]
+    #             new_langs.update(parts)
+
+    #     existing_langs = set(self.langs[1]) if len(self.langs) > 1 else set()
+    #     new_langs = sorted(new_langs - existing_langs)
+
+    #     if not new_langs:
+    #         logging.info("GLOTTOLOG dialects already integrated; skipping.")
+    #         return
+
+    #     self.data[1] = self._set_new_data_dimensions(self.data[1], [], new_langs, [])
+    #     self.langs[1] = np.append(self.langs[1], np.array(new_langs).flatten())
+        
+    #     if self.cache:
+    #         np.savez(os.path.join(self.cur_dir, "database", self.files[1]),
+    #                  feats=self.feats[1], data=self.data[1], langs=self.langs[1], sources=self.sources[1])
+
+    #     self._calculate_phylogeny_vectors()
+    #     self._calculate_geocoord_vectors()
+    #     self._calculate_script_vectors()
+
+    #     self._sync_loaded_features(1)
+    #     self._refresh_indexes(1)
+
+    #     logging.info("Glottolog integration complete.")
+
+
     def integrate_glottolog(self):
         """
-            Updates URIEL+ with data from the Glottolog database.
+        Updates URIEL+ with data from the Glottolog database.
 
-
-            This function integrates the Glottolog data.
+        This function integrates the Glottolog data.
         """
-        logging.info("Importing Glottolog from \"dialects.csv\". This may take a while....")
+        import time
 
+        start_time = time.time()
+
+        logging.info("=== START integrate_glottolog() ===")
+        logging.info('Importing Glottolog from "dialects.csv". This may take a while....')
+
+        # ---------------------------------------------------------
+        # Set Glottocodes
+        # ---------------------------------------------------------
         if self.codes == "Iso":
-            self.set_glottocodes()
-        
-        glottolog_data = pd.read_csv(os.path.join(self.cur_dir, "database", "urielplus_csvs", "dialects.csv"))
+            logging.info("self.codes == 'Iso'; calling set_glottocodes()...")
+            step_start = time.time()
 
+            self.set_glottocodes()
+
+            logging.info(
+                "set_glottocodes() completed in %.2f seconds.",
+                time.time() - step_start
+            )
+        else:
+            logging.info("self.codes is already '%s'; skipping set_glottocodes().", self.codes)
+
+        # ---------------------------------------------------------
+        # Load Glottolog CSV
+        # ---------------------------------------------------------
+        logging.info("Reading dialects.csv...")
+        step_start = time.time()
+
+        glottolog_data = pd.read_csv(
+            os.path.join(
+                self.cur_dir,
+                "database",
+                "urielplus_csvs",
+                "dialects.csv"
+            )
+        )
+
+        logging.info(
+            "dialects.csv loaded in %.2f seconds.",
+            time.time() - step_start
+        )
+        logging.info(
+            "Glottolog dataframe shape: %s rows x %s columns",
+            glottolog_data.shape[0],
+            glottolog_data.shape[1]
+        )
+
+        # ---------------------------------------------------------
+        # Extract Glottolog codes
+        # ---------------------------------------------------------
         code_cols = ['Language Glot', 'Dialect(s) Glot']
+
+        logging.info("Extracting Glottolog codes from columns: %s", code_cols)
+        step_start = time.time()
 
         new_langs = set()
 
         for col in code_cols:
+            logging.info("Processing column '%s'...", col)
+
+            entries_processed = 0
+            codes_found = 0
+
             for entry in glottolog_data[col].dropna():
-                parts = [code.strip() for code in entry.split(',') if code.strip()]
+                entries_processed += 1
+
+                parts = [
+                    code.strip()
+                    for code in entry.split(',')
+                    if code.strip()
+                ]
+
+                codes_found += len(parts)
                 new_langs.update(parts)
 
-        existing_langs = set(self.langs[1]) if len(self.langs) > 1 else set()
+            logging.info(
+                "Column '%s': processed %d entries, found %d codes.",
+                col,
+                entries_processed,
+                codes_found
+            )
+
+        logging.info(
+            "Glottolog code extraction completed in %.2f seconds.",
+            time.time() - step_start
+        )
+
+        logging.info(
+            "Total unique Glottolog codes found: %d",
+            len(new_langs)
+        )
+
+        # ---------------------------------------------------------
+        # Compare against existing languages
+        # ---------------------------------------------------------
+        logging.info("Checking existing languages...")
+        step_start = time.time()
+
+        existing_langs = (
+            set(self.langs[1])
+            if len(self.langs) > 1
+            else set()
+        )
+
+        logging.info(
+            "Existing language count: %d",
+            len(existing_langs)
+        )
+
         new_langs = sorted(new_langs - existing_langs)
+
+        logging.info(
+            "New languages to integrate: %d",
+            len(new_langs)
+        )
+
+        logging.info(
+            "Language comparison completed in %.2f seconds.",
+            time.time() - step_start
+        )
 
         if not new_langs:
             logging.info("GLOTTOLOG dialects already integrated; skipping.")
+            logging.info(
+                "=== END integrate_glottolog() (%.2f seconds) ===",
+                time.time() - start_time
+            )
             return
 
-        self.data[1] = self._set_new_data_dimensions(self.data[1], [], new_langs, [])
-        self.langs[1] = np.append(self.langs[1], np.array(new_langs).flatten())
-        
+        # ---------------------------------------------------------
+        # Add new data dimensions
+        # ---------------------------------------------------------
+        logging.info(
+            "Calling _set_new_data_dimensions() with %d new languages...",
+            len(new_langs)
+        )
+        step_start = time.time()
+
+        self.data[1] = self._set_new_data_dimensions(
+            self.data[1],
+            [],
+            new_langs,
+            []
+        )
+
+        logging.info(
+            "_set_new_data_dimensions() completed in %.2f seconds.",
+            time.time() - step_start
+        )
+
+        # ---------------------------------------------------------
+        # Update language list
+        # ---------------------------------------------------------
+        logging.info("Appending new languages to self.langs[1]...")
+        step_start = time.time()
+
+        self.langs[1] = np.append(
+            self.langs[1],
+            np.array(new_langs).flatten()
+        )
+
+        logging.info(
+            "Language list updated in %.2f seconds.",
+            time.time() - step_start
+        )
+
+        logging.info(
+            "New self.langs[1] size: %d",
+            len(self.langs[1])
+        )
+
+        # ---------------------------------------------------------
+        # Save cache
+        # ---------------------------------------------------------
         if self.cache:
-            np.savez(os.path.join(self.cur_dir, "database", self.files[1]),
-                     feats=self.feats[1], data=self.data[1], langs=self.langs[1], sources=self.sources[1])
+            logging.info("Saving updated Glottolog data to cache...")
+            step_start = time.time()
+
+            np.savez(
+                os.path.join(
+                    self.cur_dir,
+                    "database",
+                    self.files[1]
+                ),
+                feats=self.feats[1],
+                data=self.data[1],
+                langs=self.langs[1],
+                sources=self.sources[1]
+            )
+
+            logging.info(
+                "Cache saved in %.2f seconds.",
+                time.time() - step_start
+            )
+        else:
+            logging.info("self.cache is False; skipping cache save.")
+
+        # ---------------------------------------------------------
+        # Calculate phylogeny vectors
+        # ---------------------------------------------------------
+        logging.info("=== Starting _calculate_phylogeny_vectors() ===")
+        step_start = time.time()
 
         self._calculate_phylogeny_vectors()
+
+        logging.info(
+            "=== Finished _calculate_phylogeny_vectors() in %.2f seconds ===",
+            time.time() - step_start
+        )
+
+        # ---------------------------------------------------------
+        # Calculate geographic coordinate vectors
+        # ---------------------------------------------------------
+        logging.info("=== Starting _calculate_geocoord_vectors() ===")
+        step_start = time.time()
+
         self._calculate_geocoord_vectors()
+
+        logging.info(
+            "=== Finished _calculate_geocoord_vectors() in %.2f seconds ===",
+            time.time() - step_start
+        )
+
+        # ---------------------------------------------------------
+        # Calculate script vectors
+        # ---------------------------------------------------------
+        logging.info("=== Starting _calculate_script_vectors() ===")
+        step_start = time.time()
+
         self._calculate_script_vectors()
 
+        logging.info(
+            "=== Finished _calculate_script_vectors() in %.2f seconds ===",
+            time.time() - step_start
+        )
+
+        # ---------------------------------------------------------
+        # Sync loaded features
+        # ---------------------------------------------------------
+        logging.info("=== Starting _sync_loaded_features(1) ===")
+        step_start = time.time()
+
         self._sync_loaded_features(1)
+
+        logging.info(
+            "=== Finished _sync_loaded_features(1) in %.2f seconds ===",
+            time.time() - step_start
+        )
+
+        # ---------------------------------------------------------
+        # Refresh indexes
+        # ---------------------------------------------------------
+        logging.info("=== Starting _refresh_indexes(1) ===")
+        step_start = time.time()
+
         self._refresh_indexes(1)
 
-        logging.info("Glottolog integration complete.")
+        logging.info(
+            "=== Finished _refresh_indexes(1) in %.2f seconds ===",
+            time.time() - step_start
+        )
 
-    
+        # ---------------------------------------------------------
+        # Done
+        # ---------------------------------------------------------
+        logging.info(
+            "=== Glottolog integration complete. Total time: %.2f seconds ===",
+            time.time() - start_time
+        )
+
+
     def integrate_databases(self):
         """
             Updates URIEL+ with data from all available databases (UPDATED_SAPHON, BDPROTO, GRAMBANK, APICS, EWAVE, GLOTTOLOG).

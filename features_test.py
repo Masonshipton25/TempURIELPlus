@@ -48,7 +48,7 @@ np.set_printoptions(threshold=np.inf)
 
 # Write the array to a file 
 with open(file_name, "w", encoding='utf-8') as f: 
-    f.write(np.array2string(data[lang-1], separator=', ')) 
+    f.write(np.array2string(data[lang-1].astype(int), separator=', '))
     print("Array written to " + file_name)
 
 
