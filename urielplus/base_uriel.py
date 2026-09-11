@@ -55,7 +55,10 @@ class BaseURIEL:
                 raise ValueError(f"Invalid codes: {codes}. Valid codes are ('Iso', 'Glotto').")
             self.codes = codes
         else:
-            self.codes = self._infer_codes()
+            if all(self.is_iso_code(lang) for langs in self.langs for lang in langs):
+                self.codes = 'Iso'
+            else:
+                self.codes = 'Glotto'
 
 
 
@@ -193,17 +196,6 @@ class BaseURIEL:
                 bool: True if the code is in ISO 639-3 code format (3 alphabetic characters); otherwise, False.
         """
         return (len(lang) == 3 and lang.isalpha())
-
-
-    def _infer_codes(self):
-        """
-            This function inspects every language identifier across all four matrices and returns 'Iso' if
-            every one is ISO 639-3-shaped, or 'Glotto' otherwise. Used only as a fallback when no explicit
-            codes value is supplied at construction.
-        """
-        if all(self.is_iso_code(lang) for langs in self.langs for lang in langs):
-            return 'Iso'
-        return 'Glotto'
 
    
     def is_glottocode(self, lang):

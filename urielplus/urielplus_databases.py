@@ -313,10 +313,10 @@ class URIELPlusDatabases(BaseURIEL):
 
 
             Returns:
-                dict: A mapping from each column name to True (disposition "represented", becomes its own
-                feature) or False (disposition "collapsed_into" or "not_represented", excluded — either
-                because it only feeds a separate exact_collapse target computed by inferred_features(), or
-                because it maps to no public feature at all).
+                dict: A mapping from each column name to True (disposition "represented" or "collapsed_into" —
+                the latter is written temporarily so inferred_features() can read it as an exact_collapse
+                operand, then purged by _removed_operand_features() once consumed) or False (disposition
+                "not_represented", excluded because it maps to no public feature at all, ever).
 
 
             Raises:
@@ -365,18 +365,24 @@ class URIELPlusDatabases(BaseURIEL):
                 f"Undocumented columns: {undocumented}. Documented columns not present in the source: {unmatched}."
             )
 
-        return {column: disposition == "represented" for column, disposition in column_dispositions.items()}
+        return {
+            column: disposition in ("represented", "collapsed_into")
+            for column, disposition in column_dispositions.items()
+        }
 
 
     def _removed_operand_features(self):
         """
             Returns the set of typological feature names that should never remain as their own standalone
-            public feature, according to "feature_mappings.json". This covers three cases:
+            public feature, according to "feature_mappings.json". This covers four cases:
             (1) features explicitly tagged with the "removed_urielplus_operand" namespace (operands consumed
-            by an exact-collapse computation into "DERIVED");
+            by a URIELPLUS-level exact-collapse computation into "DERIVED");
             (2) bundled columns documented with disposition "not_represented" (columns that map to no
-            public feature at all); and
-            (3) bundled columns documented only via the historical "urielplus_v1_bundled_conversion_column"
+            public feature at all);
+            (3) bundled columns documented with disposition "collapsed_into" (columns temporarily written by
+            _feature_inclusion_map() purely so inferred_features() can read them as exact_collapse operands;
+            once consumed, they must not remain as standalone public features either); and
+            (4) bundled columns documented only via the historical "urielplus_v1_bundled_conversion_column"
             namespace (old, pre-split v1 column names that may still be present in the released baseline
             data, even though the source CSVs no longer produce them).
 
@@ -391,19 +397,60 @@ class URIELPlusDatabases(BaseURIEL):
                 if source_feature.get("namespace") == "removed_urielplus_operand":
                     removed.add(source_feature["id"])
 
-            if record.get("disposition") == "not_represented":
+            if record.get("disposition") in ("not_represented", "collapsed_into"):
                 removed.update(record.get("bundled_columns", ()))
         return removed
 
 
+    _EXACT_COLLAPSE_OR_PATTERN = re.compile(r"^OR\((.*)\)$")
+
+    def _parse_exact_collapse_operands(self, expression):
+        """
+            Parses a target's own "expression" field (e.g. "OR(S_VSO, S_VOS)") into its operand feature IDs.
+
+            Each target of an exact_collapse record documents its own operand set here; this is distinct from
+            (and not necessarily the same as) the record-level "source_features"/"bundled_columns" fields, which
+            may cover a broader union of features shared across several targets, or reference something other
+            than typological feature IDs entirely (e.g. a raw source parameter code).
+
+
+            Args:
+                expression (str): The target's "expression" string.
+
+
+            Returns:
+                tuple: The operand feature IDs referenced by the expression, in order.
+
+
+            Raises:
+                ValueError: If the expression is missing, malformed, or not an OR(...) expression.
+        """
+        match = self._EXACT_COLLAPSE_OR_PATTERN.fullmatch(str(expression).strip())
+        if match is None:
+            raise ValueError(f"unsupported exact-collapse expression: {expression!r}")
+        operands = tuple(part.strip() for part in match.group(1).split(","))
+        if not operands or any(not operand for operand in operands):
+            raise ValueError(f"malformed exact-collapse expression: {expression!r}")
+        return operands
+
+
     def inferred_features(self):
         """
-            Consolidates typological features according to "feature_mappings.json". Exact-collapse rules combine
-            several raw operand features into one target using a three-valued OR evaluated across every real
-            source. Positive-implication rules propagate a "1" from an antecedent feature to a consequent
-            feature, one-way only, applied repeatedly until no value changes (since one rule's output can be
-            another rule's input). Both kinds of rule write into a dedicated "DERIVED" pseudo-source, never
-            overwriting any real source's own values.
+            Consolidates typological features according to "feature_mappings.json". Two different rules feed
+            the "DERIVED" pseudo-source (never overwriting any real source's own values):
+
+            Exact-collapse rules come in two forms, matching the record's "database" field:
+              - "URIELPLUS" records merge an already-computed target feature's own value across every real
+                source via a simple max, with no operand expression involved.
+              - All other records (e.g. "APICS", or "ORIGINAL_URIEL" with a "source_layer" of "ETHNO"/"WALS"/
+                "SSWL") compute a three-valued OR of that target's named operands, restricted to the single
+                source axis the record documents. This must not be widened to every source at once: most
+                sources don't measure these operands at all and sit at -1 there, which would make "every
+                input known and 0" nearly unreachable and silently turn real 0s into -1s.
+
+            Positive-implication rules propagate a "1" from an antecedent feature to a consequent feature,
+            one-way only, applied repeatedly until no value changes (since one rule's output can be another
+            rule's input).
 
             If caching is enabled, updates the "features.npz" file.
         """
@@ -414,28 +461,47 @@ class URIELPlusDatabases(BaseURIEL):
 
         logging.info("Inferring feature data based on similar features.....")
 
-        # --- Exact collapse: three-valued OR across named operand features, over every real source ---
+        # --- Exact collapse ---
         for record in self.feature_mappings:
             if record.get("relationship") != "exact_collapse":
                 continue
-            operands = [item["id"] for item in record.get("source_features", ())]
             targets = [t for t in record.get("targets", ()) if t.get("matrix") == "typological"]
-            if not operands or not targets:
+            if not targets:
                 continue
-            if any(op not in feature_position for op in operands):
-                continue  # operand not present in this build yet; nothing to collapse
 
-            real_source_indices = [i for i in range(len(self.sources[1])) if i != derived_index]
-            operand_indices = [feature_position[op] for op in operands]
-            operand_values = self.data[1][:, operand_indices, :][:, :, real_source_indices]
-
-            collapsed = np.where(
-                np.any(operand_values == 1, axis=(1, 2)), 1,
-                np.where(np.all(operand_values == 0, axis=(1, 2)), 0, -1)
-            )
+            is_global = record.get("database") == "URIELPLUS"
+            source_index = None
+            if not is_global:
+                source_matches = np.where(self.sources[1] == record.get("source_layer"))[0]
+                if len(source_matches) == 0:
+                    continue  # this record's source isn't part of the current build yet
+                source_index = source_matches[0]
 
             for target in targets:
                 target_feature = target["feature_id"]
+
+                if is_global:
+                    # Merge the target's own value across every real source into DERIVED; no operands here.
+                    if target_feature not in feature_position:
+                        continue  # nothing written to this target by any other rule yet
+                    real_source_indices = [i for i in range(len(self.sources[1])) if i != derived_index]
+                    collapsed = self.data[1][:, feature_position[target_feature], real_source_indices].max(axis=1)
+                else:
+                    # Each target carries its own operand set in "expression"; a record's "source_features"/
+                    # "bundled_columns" may be a broader union shared across several targets (or something
+                    # other than typological feature IDs), so it must not stand in for this.
+                    operands = self._parse_exact_collapse_operands(target["expression"])
+                    if any(op not in feature_position for op in operands):
+                        continue  # operand not present in this build yet; nothing to collapse for this target
+
+                    operand_indices = [feature_position[op] for op in operands]
+                    operand_values = self.data[1][:, operand_indices, source_index]
+
+                    collapsed = np.where(
+                        np.any(operand_values == 1, axis=1), 1,
+                        np.where(np.all(operand_values == 0, axis=1), 0, -1)
+                    )
+
                 if target_feature not in feature_position:
                     self.data[1] = self._set_new_data_dimensions(self.data[1], [target_feature], [], [])
                     self.feats[1] = np.append(self.feats[1], target_feature)
@@ -782,329 +848,51 @@ class URIELPlusDatabases(BaseURIEL):
         logging.info("eWAVE integration complete.")
 
 
-    # def integrate_glottolog(self):
-    #     """
-    #         Updates URIEL+ with data from the Glottolog database.
-
-
-    #         This function integrates the Glottolog data.
-    #     """
-    #     logging.info("Importing Glottolog from \"dialects.csv\". This may take a while....")
-
-    #     if self.codes == "Iso":
-    #         self.set_glottocodes()
-        
-    #     glottolog_data = pd.read_csv(os.path.join(self.cur_dir, "database", "urielplus_csvs", "dialects.csv"))
-
-    #     code_cols = ['Language Glot', 'Dialect(s) Glot']
-
-    #     new_langs = set()
-
-    #     for col in code_cols:
-    #         for entry in glottolog_data[col].dropna():
-    #             parts = [code.strip() for code in entry.split(',') if code.strip()]
-    #             new_langs.update(parts)
-
-    #     existing_langs = set(self.langs[1]) if len(self.langs) > 1 else set()
-    #     new_langs = sorted(new_langs - existing_langs)
-
-    #     if not new_langs:
-    #         logging.info("GLOTTOLOG dialects already integrated; skipping.")
-    #         return
-
-    #     self.data[1] = self._set_new_data_dimensions(self.data[1], [], new_langs, [])
-    #     self.langs[1] = np.append(self.langs[1], np.array(new_langs).flatten())
-        
-    #     if self.cache:
-    #         np.savez(os.path.join(self.cur_dir, "database", self.files[1]),
-    #                  feats=self.feats[1], data=self.data[1], langs=self.langs[1], sources=self.sources[1])
-
-    #     self._calculate_phylogeny_vectors()
-    #     self._calculate_geocoord_vectors()
-    #     self._calculate_script_vectors()
-
-    #     self._sync_loaded_features(1)
-    #     self._refresh_indexes(1)
-
-    #     logging.info("Glottolog integration complete.")
-
-
     def integrate_glottolog(self):
         """
-        Updates URIEL+ with data from the Glottolog database.
+            Updates URIEL+ with data from the Glottolog database.
 
-        This function integrates the Glottolog data.
+
+            This function integrates the Glottolog data.
         """
-        import time
+        logging.info("Importing Glottolog from \"dialects.csv\"....")
 
-        start_time = time.time()
-
-        logging.info("=== START integrate_glottolog() ===")
-        logging.info('Importing Glottolog from "dialects.csv". This may take a while....')
-
-        # ---------------------------------------------------------
-        # Set Glottocodes
-        # ---------------------------------------------------------
         if self.codes == "Iso":
-            logging.info("self.codes == 'Iso'; calling set_glottocodes()...")
-            step_start = time.time()
-
             self.set_glottocodes()
+        
+        glottolog_data = pd.read_csv(os.path.join(self.cur_dir, "database", "urielplus_csvs", "dialects.csv"))
 
-            logging.info(
-                "set_glottocodes() completed in %.2f seconds.",
-                time.time() - step_start
-            )
-        else:
-            logging.info("self.codes is already '%s'; skipping set_glottocodes().", self.codes)
-
-        # ---------------------------------------------------------
-        # Load Glottolog CSV
-        # ---------------------------------------------------------
-        logging.info("Reading dialects.csv...")
-        step_start = time.time()
-
-        glottolog_data = pd.read_csv(
-            os.path.join(
-                self.cur_dir,
-                "database",
-                "urielplus_csvs",
-                "dialects.csv"
-            )
-        )
-
-        logging.info(
-            "dialects.csv loaded in %.2f seconds.",
-            time.time() - step_start
-        )
-        logging.info(
-            "Glottolog dataframe shape: %s rows x %s columns",
-            glottolog_data.shape[0],
-            glottolog_data.shape[1]
-        )
-
-        # ---------------------------------------------------------
-        # Extract Glottolog codes
-        # ---------------------------------------------------------
         code_cols = ['Language Glot', 'Dialect(s) Glot']
-
-        logging.info("Extracting Glottolog codes from columns: %s", code_cols)
-        step_start = time.time()
 
         new_langs = set()
 
         for col in code_cols:
-            logging.info("Processing column '%s'...", col)
-
-            entries_processed = 0
-            codes_found = 0
-
             for entry in glottolog_data[col].dropna():
-                entries_processed += 1
-
-                parts = [
-                    code.strip()
-                    for code in entry.split(',')
-                    if code.strip()
-                ]
-
-                codes_found += len(parts)
+                parts = [code.strip() for code in entry.split(',') if code.strip()]
                 new_langs.update(parts)
 
-            logging.info(
-                "Column '%s': processed %d entries, found %d codes.",
-                col,
-                entries_processed,
-                codes_found
-            )
-
-        logging.info(
-            "Glottolog code extraction completed in %.2f seconds.",
-            time.time() - step_start
-        )
-
-        logging.info(
-            "Total unique Glottolog codes found: %d",
-            len(new_langs)
-        )
-
-        # ---------------------------------------------------------
-        # Compare against existing languages
-        # ---------------------------------------------------------
-        logging.info("Checking existing languages...")
-        step_start = time.time()
-
-        existing_langs = (
-            set(self.langs[1])
-            if len(self.langs) > 1
-            else set()
-        )
-
-        logging.info(
-            "Existing language count: %d",
-            len(existing_langs)
-        )
-
+        existing_langs = set(self.langs[1]) if len(self.langs) > 1 else set()
         new_langs = sorted(new_langs - existing_langs)
-
-        logging.info(
-            "New languages to integrate: %d",
-            len(new_langs)
-        )
-
-        logging.info(
-            "Language comparison completed in %.2f seconds.",
-            time.time() - step_start
-        )
 
         if not new_langs:
             logging.info("GLOTTOLOG dialects already integrated; skipping.")
-            logging.info(
-                "=== END integrate_glottolog() (%.2f seconds) ===",
-                time.time() - start_time
-            )
             return
 
-        # ---------------------------------------------------------
-        # Add new data dimensions
-        # ---------------------------------------------------------
-        logging.info(
-            "Calling _set_new_data_dimensions() with %d new languages...",
-            len(new_langs)
-        )
-        step_start = time.time()
-
-        self.data[1] = self._set_new_data_dimensions(
-            self.data[1],
-            [],
-            new_langs,
-            []
-        )
-
-        logging.info(
-            "_set_new_data_dimensions() completed in %.2f seconds.",
-            time.time() - step_start
-        )
-
-        # ---------------------------------------------------------
-        # Update language list
-        # ---------------------------------------------------------
-        logging.info("Appending new languages to self.langs[1]...")
-        step_start = time.time()
-
-        self.langs[1] = np.append(
-            self.langs[1],
-            np.array(new_langs).flatten()
-        )
-
-        logging.info(
-            "Language list updated in %.2f seconds.",
-            time.time() - step_start
-        )
-
-        logging.info(
-            "New self.langs[1] size: %d",
-            len(self.langs[1])
-        )
-
-        # ---------------------------------------------------------
-        # Save cache
-        # ---------------------------------------------------------
+        self.data[1] = self._set_new_data_dimensions(self.data[1], [], new_langs, [])
+        self.langs[1] = np.append(self.langs[1], np.array(new_langs).flatten())
+        
         if self.cache:
-            logging.info("Saving updated Glottolog data to cache...")
-            step_start = time.time()
-
-            np.savez(
-                os.path.join(
-                    self.cur_dir,
-                    "database",
-                    self.files[1]
-                ),
-                feats=self.feats[1],
-                data=self.data[1],
-                langs=self.langs[1],
-                sources=self.sources[1]
-            )
-
-            logging.info(
-                "Cache saved in %.2f seconds.",
-                time.time() - step_start
-            )
-        else:
-            logging.info("self.cache is False; skipping cache save.")
-
-        # ---------------------------------------------------------
-        # Calculate phylogeny vectors
-        # ---------------------------------------------------------
-        logging.info("=== Starting _calculate_phylogeny_vectors() ===")
-        step_start = time.time()
+            np.savez(os.path.join(self.cur_dir, "database", self.files[1]),
+                     feats=self.feats[1], data=self.data[1], langs=self.langs[1], sources=self.sources[1])
 
         self._calculate_phylogeny_vectors()
-
-        logging.info(
-            "=== Finished _calculate_phylogeny_vectors() in %.2f seconds ===",
-            time.time() - step_start
-        )
-
-        # ---------------------------------------------------------
-        # Calculate geographic coordinate vectors
-        # ---------------------------------------------------------
-        logging.info("=== Starting _calculate_geocoord_vectors() ===")
-        step_start = time.time()
-
         self._calculate_geocoord_vectors()
-
-        logging.info(
-            "=== Finished _calculate_geocoord_vectors() in %.2f seconds ===",
-            time.time() - step_start
-        )
-
-        # ---------------------------------------------------------
-        # Calculate script vectors
-        # ---------------------------------------------------------
-        logging.info("=== Starting _calculate_script_vectors() ===")
-        step_start = time.time()
-
         self._calculate_script_vectors()
 
-        logging.info(
-            "=== Finished _calculate_script_vectors() in %.2f seconds ===",
-            time.time() - step_start
-        )
-
-        # ---------------------------------------------------------
-        # Sync loaded features
-        # ---------------------------------------------------------
-        logging.info("=== Starting _sync_loaded_features(1) ===")
-        step_start = time.time()
-
         self._sync_loaded_features(1)
-
-        logging.info(
-            "=== Finished _sync_loaded_features(1) in %.2f seconds ===",
-            time.time() - step_start
-        )
-
-        # ---------------------------------------------------------
-        # Refresh indexes
-        # ---------------------------------------------------------
-        logging.info("=== Starting _refresh_indexes(1) ===")
-        step_start = time.time()
-
         self._refresh_indexes(1)
 
-        logging.info(
-            "=== Finished _refresh_indexes(1) in %.2f seconds ===",
-            time.time() - step_start
-        )
-
-        # ---------------------------------------------------------
-        # Done
-        # ---------------------------------------------------------
-        logging.info(
-            "=== Glottolog integration complete. Total time: %.2f seconds ===",
-            time.time() - start_time
-        )
+        logging.info("Glottolog integration complete.")
 
 
     def integrate_databases(self):

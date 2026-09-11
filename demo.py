@@ -17,7 +17,7 @@ u.integrate_databases()
 # u.all_feature_coverage()
 
 # # Imputation
-u.softimpute_imputation()
+# u.softimpute_imputation()
 
 #Feature Coverage
 # u.all_feature_coverage()
