@@ -184,7 +184,7 @@ class URIELPlusDatabases(BaseURIEL):
 
             If caching is enabled, overwrites the `geocoord_features.npz` file.
         """
-        _frame, selected = self._selected_family_metadata()
+        frame, selected = self._selected_family_metadata()
 
         with np.load(os.path.join(self.cur_dir, "database", "original_uriel", "geocoord_features.npz"),
                      allow_pickle=False) as archive:
@@ -250,15 +250,13 @@ class URIELPlusDatabases(BaseURIEL):
 
     def _calculate_script_vectors(self):
         """
-            Rebuilds the full script-features matrix from script_data.csv over the whole language axis
-            (self.langs[1]), then applies every "SCRIPTSOURCE" rule in feature_mappings.json that targets
-            the "script" matrix: bundled operand columns feeding an "exact_collapse" record are combined
-            into their target feature via a three-valued OR (1 if any operand is 1, 0 if every operand is
-            known and 0, otherwise -1), and any raw column whose disposition is "not_represented" or
-            "collapsed_into" is dropped from the exposed feature set. The source axis is labelled
+            Rebuilds the full script-features matrix from script_data.csv and applies
+            feature_mappings.json rules to derive and remove script features. Exact-collapse
+            rules combine bundled SCRIPTSOURCE columns, while positive-implication rules
+            propagate positive values to a fixed point. The source axis is labelled
             "SCRIPTSOURCE_DERIVED".
 
-            If caching is enabled, overwrites the `script_features.npz` file.
+            If caching is enabled, overwrites the "script_features.npz" file.
         """
         self._ensure_feature_mappings()
 
@@ -281,7 +279,7 @@ class URIELPlusDatabases(BaseURIEL):
             for col in raw_columns:
                 data[row, column_position[col], 0] = float(script_csv.at[source_row, col])
 
-        # --- Apply SCRIPTSOURCE exact-collapse rules restricted to the "script" matrix ---
+        # Apply SCRIPTSOURCE exact-collapse rules restricted to the "script" matrix
         removed = set()
         for record in self.feature_mappings:
             if record.get("database") != "SCRIPTSOURCE":
@@ -321,7 +319,40 @@ class URIELPlusDatabases(BaseURIEL):
                 target_index = column_position[target_feature]
                 data[:, target_index, 0] = np.maximum(data[:, target_index, 0], collapsed)
 
-        # --- Drop raw columns that were bundled into a derived feature or explicitly not represented ---
+        # Apply positive-implication rules restricted to the "script" matrix
+        implication_records = [
+            record for record in self.feature_mappings
+            if record.get("database") == "URIELPLUS"
+            and record.get("relationship") == "positive_implication"
+            and any(target.get("matrix") == "script" for target in record.get("targets", ()))
+        ]
+
+        for _ in range(len(implication_records) + 1):
+            changed = False
+            for record in implication_records:
+                antecedents = [item["id"] for item in record.get("source_features", ())]
+                targets = [t for t in record.get("targets", ()) if t.get("matrix") == "script"]
+                if len(targets) != 1 or any(a not in column_position for a in antecedents):
+                    continue
+
+                target_feature = targets[0]["feature_id"]
+                if target_feature not in column_position:
+                    continue
+
+                antecedent_indices = [column_position[a] for a in antecedents]
+                active = np.any(data[:, antecedent_indices, 0] == 1, axis=1)
+
+                target_index = column_position[target_feature]
+                update = active & (data[:, target_index, 0] != 1)
+                if update.any():
+                    data[update, target_index, 0] = 1
+                    changed = True
+            if not changed:
+                break
+        else:
+            raise ValueError("script positive-implication rules did not reach a fixed point.")
+
+        # Drop raw columns that were bundled into a derived feature or explicitly not represented
         keep_mask = np.array([col not in removed for col in raw_columns])
         features = np.asarray(raw_columns, dtype=str)[keep_mask]
         data = data[:, keep_mask, :]
@@ -437,21 +468,13 @@ class URIELPlusDatabases(BaseURIEL):
 
     def inferred_features(self):
         """
-            Consolidates typological features according to "feature_mappings.json". Two different rules feed
-            the "DERIVED" pseudo-source (never overwriting any real source's own values):
-
-            Exact-collapse rules come in two forms, matching the record's "database" field:
-              - "URIELPLUS" records merge an already-computed target feature's own value across every real
-                source via a simple max, with no operand expression involved.
-              - All other records (e.g. "APICS", or "ORIGINAL_URIEL" with a "source_layer" of "ETHNO"/"WALS"/
-                "SSWL") compute a three-valued OR of that target's named operands, restricted to the single
-                source axis the record documents. This must not be widened to every source at once: most
-                sources don't measure these operands at all and sit at -1 there, which would make "every
-                input known and 0" nearly unreachable and silently turn real 0s into -1s.
-
-            Positive-implication rules propagate a "1" from an antecedent feature to a consequent feature,
-            one-way only, applied repeatedly until no value changes (since one rule's output can be another
-            rule's input).
+            Consolidates typological features according to "feature_mappings.json".
+            Exact-collapse rules populate the "DERIVED" source using either values
+            merged across real sources or three-valued OR over the rule's operands.
+            Positive-implication rules propagate positive values to a fixed point.
+            Redundant features marked as "not_represented", "collapsed_into", or
+            "removed_urielplus_operand" are removed unless protected by a represented
+            target.
 
             If caching is enabled, updates the "features.npz" file.
         """
@@ -462,7 +485,7 @@ class URIELPlusDatabases(BaseURIEL):
 
         logging.info("Inferring feature data based on similar features.....")
 
-        # --- Exact collapse ---
+        # Exact collapse
         for record in self.feature_mappings:
             if record.get("relationship") != "exact_collapse":
                 continue
@@ -520,7 +543,7 @@ class URIELPlusDatabases(BaseURIEL):
                 current = self.data[1][:, target_index, derived_index]
                 self.data[1][:, target_index, derived_index] = np.maximum(current, collapsed)
 
-        # --- Positive implication: propagate "1" from antecedent to consequent, to a fixpoint ---
+        # Positive implication: propagate "1" from antecedent to consequent, to a fixpoint
         implication_records = [
             record for record in self.feature_mappings
             if record.get("database") == "URIELPLUS" and record.get("relationship") == "positive_implication"

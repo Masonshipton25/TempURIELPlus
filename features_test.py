@@ -69,18 +69,18 @@ data = npz_file['data']
 #List of features 
 with open("fam_language_features.txt", "w", encoding='utf-8') as f: 
     for item in features: f.write(f"{item}\n") 
-    print("Array written to language_features.txt") 
+    print("Array written to fam_language_features.txt") 
 
 #List of languages 
 with open("fam_language_names.txt", "w", encoding='utf-8') as f: 
     for item in languages: 
         f.write(f"{item}\n") 
-    print("Array written to geo_language_names.txt") 
+    print("Array written to fam_language_names.txt") 
 
 #List of sources
 with open("fam_feature_sources.txt", "w", encoding='utf-8') as f: 
     for item in sources: f.write(f"{item}\n") 
-    print("Array written to feature_sources.txt") 
+    print("Array written to fam_feature_sources.txt") 
 
 
 with open("fam_language_names.txt", "r", encoding='utf-8') as f:
@@ -163,18 +163,18 @@ data = npz_file['data']
 #List of features 
 with open("script_language_features.txt", "w", encoding='utf-8') as f: 
     for item in features: f.write(f"{item}\n") 
-    print("Array written to language_features.txt") 
+    print("Array written to script_language_features.txt") 
 
 #List of languages 
 with open("script_language_names.txt", "w", encoding='utf-8') as f: 
     for item in languages: 
         f.write(f"{item}\n") 
-    print("Array written to geo_language_names.txt") 
+    print("Array written to script_language_names.txt") 
 
 #List of sources
 with open("script_feature_sources.txt", "w", encoding='utf-8') as f: 
     for item in sources: f.write(f"{item}\n") 
-    print("Array written to feature_sources.txt") 
+    print("Array written to script_feature_sources.txt") 
 
 
 with open("script_language_names.txt", "r", encoding='utf-8') as f:
