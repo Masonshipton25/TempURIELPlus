@@ -17,10 +17,10 @@ u.integrate_databases()
 # u.all_feature_coverage()
 
 # Imputation
-# u.softimpute_imputation()
+u.softimpute_imputation()
 
 #Feature Coverage
 # u.all_feature_coverage()
 
 #Distance Calculation
-# print(u.new_distance("script", "stan1290", "stan1293"))
+print(u.new_distance("script", "stan1290", "stan1293"))

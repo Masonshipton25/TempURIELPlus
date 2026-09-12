@@ -253,7 +253,7 @@ def main():
         "inventory",
         "geographic",
         "morphological",
-        "scriptural",
+        "script",
     ]
 
     # Test new_distance()
@@ -312,10 +312,15 @@ def main():
         print(f"\nTesting new_custom_distance() with source={source}")
 
         try:
+            # NOTE: `source` must be passed as a keyword argument.
+            # new_custom_distance's real signature is
+            # (self, features, *args, source='A'), so passing source
+            # positionally causes it to be swallowed into *args along
+            # with the language list, breaking the language parsing.
             result = u.new_custom_distance(
                 features,
                 [language_1, language_2],
-                source
+                source=source
             )
 
             print("  SUCCESS")
@@ -362,16 +367,44 @@ def main():
     print("\n[10] FEATURE COVERAGE")
     print("-" * 80)
 
-    try:
-        result = u.feature_coverage()
+    # Option A: all_feature_coverage() - no arguments, prints coverage
+    # for every resource level and every distance type. This is the
+    # behavior the README documents as `feature_coverage()`.
+    print("\nTesting all_feature_coverage()")
 
-        print("feature_coverage() SUCCESS")
-        print("Result:")
-        print(result)
+    try:
+        result = u.all_feature_coverage()
+
+        print("  SUCCESS")
+        print("  Return value:", result)
 
     except Exception as e:
-        print("feature_coverage() FAILED")
-        print("Error:", type(e).__name__, "-", e)
+        print("  FAILED")
+        print("  Error:", type(e).__name__, "-", e)
+
+    # Option B: feature_coverage(resource_level, distance_type) - the
+    # newer, targeted function. Requires a resource level
+    # ("high-resource", "medium-resource", or "low-resource") and a
+    # distance type. Loop over combinations to exercise it broadly.
+    resource_levels = [
+        "high-resource",
+        "medium-resource",
+        "low-resource",
+    ]
+
+    for resource_level in resource_levels:
+        for distance_type in distance_types:
+            print(f"\nTesting feature_coverage('{resource_level}', '{distance_type}')")
+
+            try:
+                result = u.feature_coverage(resource_level, distance_type)
+
+                print("  SUCCESS")
+                print("  Result:", result)
+
+            except Exception as e:
+                print("  FAILED")
+                print("  Error:", type(e).__name__, "-", e)
 
     # ------------------------------------------------------------------
     # Confidence Scores
