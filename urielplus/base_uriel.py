@@ -21,20 +21,20 @@ class BaseURIEL:
             distance_metric (str): The distance metric to use for distance calculations ("angular" or "cosine").
             Defaults to "angular".
 
-            codes (str): Whether to identify languages with Iso 639-3 codes (Iso) or Glottocodes (Glotto).
-            Defaults to "Iso".
-            NOTE: Once set to "Glotto", codes cannot be changed back to "Iso" unless URIEL+ is reset.
-
             include_lineage_in_eval (bool): Whether values filled in via parent language (lineage) data during
             imputation are included when evaluating imputation quality.
             Defaults to False.
+
+            codes (str): Whether to identify languages with Iso 639-3 codes (Iso) or Glottocodes (Glotto).
+            Defaults to "Iso".
+            NOTE: Once set to "Glotto", codes cannot be changed back to "Iso" unless URIEL+ is reset.
     """
     cache = False
     aggregation = 'U'
     fill_with_base_lang = True
     distance_metric = "angular"
-    codes = 'Iso'
     include_lineage_in_eval = False
+    codes = 'Iso'
 
 
     def __init__(self, feats, langs, data, sources, codes=None):
@@ -67,7 +67,6 @@ class BaseURIEL:
         """
             Returns whether to cache distance languages and changes to databases.
 
-
             Returns:
                 bool: True if caching is enabled, False otherwise.
         """
@@ -77,7 +76,6 @@ class BaseURIEL:
     def set_cache(self, cache):
         """
             Sets whether to cache distance languages and changes to databases.
-
 
             Args:
                 cache (bool): True to enable caching, False otherwise.
@@ -96,7 +94,6 @@ class BaseURIEL:
         """
             Returns whether to perform a union ('U') or average ('A') operation on data for aggregation and distance calculations.
 
-
             Returns:
                 str: 'U' if aggregation is union, 'A' if aggregation is average.
         """
@@ -106,7 +103,6 @@ class BaseURIEL:
     def set_aggregation(self, aggregation):
         """
             Sets whether to perform a union ('U') or average ('A') operation on data for aggregation and distance calculations.
-
 
             Args:
                 aggregation (str): Whether to perform a union ('U') or average ('A') operation on data for aggregation and distance calculations.
@@ -126,7 +122,6 @@ class BaseURIEL:
         """
             Returns whether to fill missing values during aggregation using parent language data.
 
-
             Returns:
                 bool: True if filling missing values with parent language data is enabled, False otherwise.
         """
@@ -136,7 +131,6 @@ class BaseURIEL:
     def set_fill_with_base_lang(self, fill_with_base_lang):
         """
             Sets whether to fill missing values during aggregation using parent language data.
-
 
             Args:
                 fill_with_base_lang (bool): True to enable filling with base language, False otherwise.
@@ -155,7 +149,6 @@ class BaseURIEL:
         """
             Returns the distance metric to use for distance calculations.
 
-
             Returns:
                 str: The distance metric to use for distance calculations.
         """
@@ -165,7 +158,6 @@ class BaseURIEL:
     def set_distance_metric(self, distance_metric):
         """
             Sets the distance metric to use for distance calculations.
-
 
             Args:
                 distance_metric (str): The distance metric to use for distance calculations.
@@ -181,54 +173,10 @@ class BaseURIEL:
 
 
 
-
-    
-    def is_iso_code(self, lang):
-        """
-            Checks if a provided language code is in ISO 639-3 code format.
-
-
-            Args:
-                lang (str): The language code to check.
-
-
-            Returns:
-                bool: True if the code is in ISO 639-3 code format (3 alphabetic characters); otherwise, False.
-        """
-        return (len(lang) == 3 and lang.isalpha())
-
-   
-    def is_glottocode(self, lang):
-        """
-            Checks if a provided language code is in Glottocode format.
-
-
-            Args:
-                lang (str): The language code to check.
-
-
-            Returns:
-                bool: True if the code is in Glottocode format (4 alphabetic characters followed by 4 numeric characters); otherwise, False.
-        """
-        return (len(lang) == 8 and lang[:4].isalpha() and lang[4:].isnumeric())
-
-
-    def get_codes(self):
-        """
-        Returns whether URIEL+ identifies languages with Iso 639-3 codes (Iso) or Glottocodes (Glotto).
-
-
-        Returns:
-            str: 'Iso' if codes is Iso 639-3 codes, 'Glotto' if codes is Glottocodes.
-        """
-        return self.codes
-
-
     def get_lineage_imputed_indices(self):
         """
             Returns the set of language indices whose values were filled in using parent language (lineage)
             data during the most recent imputation run.
-
 
             Returns:
                 set: The indices of languages filled in via lineage-based imputation.
@@ -239,7 +187,6 @@ class BaseURIEL:
     def set_lineage_imputed_indices(self, lineage_imputed_indices):
         """
             Sets the set of language indices whose values were filled in using parent language (lineage) data.
-
 
             Args:
                 lineage_imputed_indices (set): The indices of languages filled in via lineage-based imputation.
@@ -252,11 +199,11 @@ class BaseURIEL:
         self.lineage_imputed_indices = lineage_imputed_indices
 
 
+
     def get_include_lineage_in_eval(self):
         """
             Returns whether values filled in via parent language (lineage) data are included when
             evaluating imputation quality.
-
 
             Returns:
                 bool: True if lineage-imputed values are included in evaluation, False otherwise.
@@ -269,7 +216,6 @@ class BaseURIEL:
             Sets whether values filled in via parent language (lineage) data are included when evaluating
             imputation quality.
 
-
             Args:
                 include_lineage_in_eval (bool): True to include lineage-imputed values in evaluation, False
                 otherwise.
@@ -280,7 +226,45 @@ class BaseURIEL:
         if not isinstance(include_lineage_in_eval, bool):
             raise ValueError(f"Invalid boolean value: {include_lineage_in_eval}. Valid boolean values are True and False.")
         self.include_lineage_in_eval = include_lineage_in_eval
-        
+
+
+
+    
+    def is_iso_code(self, lang):
+        """
+            Checks if a provided language code is in ISO 639-3 code format.
+
+            Args:
+                lang (str): The language code to check.
+
+            Returns:
+                bool: True if the code is in ISO 639-3 code format (3 alphabetic characters); otherwise, False.
+        """
+        return (len(lang) == 3 and lang.isalpha())
+
+   
+    def is_glottocode(self, lang):
+        """
+            Checks if a provided language code is in Glottocode format.
+
+            Args:
+                lang (str): The language code to check.
+
+            Returns:
+                bool: True if the code is in Glottocode format (4 alphabetic characters followed by 4 numeric characters); otherwise, False.
+        """
+        return (len(lang) == 8 and lang[:4].isalpha() and lang[4:].isnumeric())
+
+
+    def get_codes(self):
+        """
+        Returns whether URIEL+ identifies languages with Iso 639-3 codes (Iso) or Glottocodes (Glotto).
+
+        Returns:
+            str: 'Iso' if codes is Iso 639-3 codes, 'Glotto' if codes is Glottocodes.
+        """
+        return self.codes
+
 
 
    

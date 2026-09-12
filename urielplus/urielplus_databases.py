@@ -15,11 +15,9 @@ class URIELPlusDatabases(BaseURIEL):
         """
             Identifies and returns the new features to URIEL+.
 
-
             Args:
                 feats (np.ndarray): The current features array.
                 columns (list): The list of all features.
-
 
             Returns:
                 list: A list of new features to URIEL+.
@@ -32,12 +30,10 @@ class URIELPlusDatabases(BaseURIEL):
         """
             Identifies and returns the new languages to URIEL+.
 
-
             Args:
                 langs (np.ndarray): The current languages array.
                 data (pd.DataFrame): The new dataset containing all languages.
                 column (str): The column in the dataset that contains language codes.
-
 
             Returns:
                 list: A list of new languages to URIEL+.
@@ -51,13 +47,11 @@ class URIELPlusDatabases(BaseURIEL):
             Expands the URIEL+ data array to accommodate new features, languages, and sources, initializing new values
             to -1.0.
 
-
             Args:
                 data (np.ndarray): The current data array.
                 new_feats (list): List of new features to add.
                 new_langs (list): List of new languages to add.
                 new_sources (list): List of new sources to add.
-
 
             Returns:
                 np.ndarray: The expanded data array with new dimensions.
@@ -74,9 +68,11 @@ class URIELPlusDatabases(BaseURIEL):
         """
             Checks if a specific database has already been integrated into URIEL+.
 
-
             Args:
                 database (str): The name of the database to check.
+
+            Returns:
+                bool: True if the database is already integrated.
         """
         all_sources = [str(s).upper() for s in self.sources[1]]
         return database.upper() in all_sources
@@ -87,7 +83,6 @@ class URIELPlusDatabases(BaseURIEL):
             This function reads the relevant CSV file and updates the phylogeny arrays based on the full lineage
             of new languages. Each lineage node, from root to leaf, becomes its own path-qualified feature
             (F_<root> > <child> > ... > <node>), and every ancestor node in a language's lineage is set to 1.
-
             
             If caching is enabled, updates the "family_features.npz" file.
         """
@@ -272,8 +267,11 @@ class URIELPlusDatabases(BaseURIEL):
 
     def _get_or_create_derived_source(self):
         """
-            Returns the index of the "DERIVED" pseudo-source in self.sources[1], creating an empty layer
+            Finds the "DERIVED" source, creating an empty layer
             (initialized to -1 for every existing language and feature) if it does not already exist.
+
+            Returns:
+                int: The index of the "DERIVED" source.
         """
         matches = np.where(self.sources[1] == "DERIVED")[0]
         if len(matches):
@@ -283,22 +281,14 @@ class URIELPlusDatabases(BaseURIEL):
         return len(self.sources[1]) - 1
 
 
-    def _load_feature_mappings(self):
-        """
-            This function loads the JSON file defining feature consolidation mappings used for combining and
-            inferring feature data in URIEL+.
-        """
-        path = os.path.join(self.cur_dir, "database", "urielplus_csvs", "feature_mappings.json")
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-
-
     def _ensure_feature_mappings(self):
         """
             This function ensures feature mappings are loaded before use.
         """
         if not hasattr(self, "feature_mappings"):
-            self.feature_mappings = self._load_feature_mappings()
+            path = os.path.join(self.cur_dir, "database", "urielplus_csvs", "feature_mappings.json")
+            with open(path, "r", encoding="utf-8") as f:
+                self.feature_mappings = json.load(f)
 
 
     def _feature_inclusion_map(self, database, columns):
@@ -371,69 +361,6 @@ class URIELPlusDatabases(BaseURIEL):
         }
 
 
-    def _removed_operand_features(self):
-        """
-            Returns the set of typological feature names that should never remain as their own standalone
-            public feature, according to "feature_mappings.json". This covers four cases:
-            (1) features explicitly tagged with the "removed_urielplus_operand" namespace (operands consumed
-            by a URIELPLUS-level exact-collapse computation into "DERIVED");
-            (2) bundled columns documented with disposition "not_represented" (columns that map to no
-            public feature at all);
-            (3) bundled columns documented with disposition "collapsed_into" (columns temporarily written by
-            _feature_inclusion_map() purely so inferred_features() can read them as exact_collapse operands;
-            once consumed, they must not remain as standalone public features either); and
-            (4) bundled columns documented only via the historical "urielplus_v1_bundled_conversion_column"
-            namespace (old, pre-split v1 column names that may still be present in the released baseline
-            data, even though the source CSVs no longer produce them).
-
-
-            Returns:
-                set: The feature names to purge from self.feats[1]/self.data[1].
-        """
-        self._ensure_feature_mappings()
-        removed = set()
-        for record in self.feature_mappings:
-            for source_feature in record.get("source_features", ()):
-                if source_feature.get("namespace") == "removed_urielplus_operand":
-                    removed.add(source_feature["id"])
-
-            if record.get("disposition") in ("not_represented", "collapsed_into"):
-                removed.update(record.get("bundled_columns", ()))
-        return removed
-
-
-    _EXACT_COLLAPSE_OR_PATTERN = re.compile(r"^OR\((.*)\)$")
-
-    def _parse_exact_collapse_operands(self, expression):
-        """
-            Parses a target's own "expression" field (e.g. "OR(S_VSO, S_VOS)") into its operand feature IDs.
-
-            Each target of an exact_collapse record documents its own operand set here; this is distinct from
-            (and not necessarily the same as) the record-level "source_features"/"bundled_columns" fields, which
-            may cover a broader union of features shared across several targets, or reference something other
-            than typological feature IDs entirely (e.g. a raw source parameter code).
-
-
-            Args:
-                expression (str): The target's "expression" string.
-
-
-            Returns:
-                tuple: The operand feature IDs referenced by the expression, in order.
-
-
-            Raises:
-                ValueError: If the expression is missing, malformed, or not an OR(...) expression.
-        """
-        match = self._EXACT_COLLAPSE_OR_PATTERN.fullmatch(str(expression).strip())
-        if match is None:
-            raise ValueError(f"unsupported exact-collapse expression: {expression!r}")
-        operands = tuple(part.strip() for part in match.group(1).split(","))
-        if not operands or any(not operand for operand in operands):
-            raise ValueError(f"malformed exact-collapse expression: {expression!r}")
-        return operands
-
-
     def inferred_features(self):
         """
             Consolidates typological features according to "feature_mappings.json". Two different rules feed
@@ -490,7 +417,14 @@ class URIELPlusDatabases(BaseURIEL):
                     # Each target carries its own operand set in "expression"; a record's "source_features"/
                     # "bundled_columns" may be a broader union shared across several targets (or something
                     # other than typological feature IDs), so it must not stand in for this.
-                    operands = self._parse_exact_collapse_operands(target["expression"])
+                    expression = target["expression"]
+                    match = re.compile(r"^OR\((.*)\)$").fullmatch(str(expression).strip())
+                    if match is None:
+                        raise ValueError(f"unsupported exact-collapse expression: {expression!r}")
+                    operands = tuple(part.strip() for part in match.group(1).split(","))
+                    if not operands or any(not operand for operand in operands):
+                        raise ValueError(f"malformed exact-collapse expression: {expression!r}")
+
                     if any(op not in feature_position for op in operands):
                         continue  # operand not present in this build yet; nothing to collapse for this target
 
@@ -543,7 +477,24 @@ class URIELPlusDatabases(BaseURIEL):
         else:
             raise ValueError("typological positive-implication rules did not reach a fixed point.")
 
-        removed_operands = self._removed_operand_features()
+        removed = set()
+        protected = set()
+        for record in self.feature_mappings:
+            for source_feature in record.get("source_features", ()):
+                if source_feature.get("namespace") == "removed_urielplus_operand":
+                    removed.add(source_feature["id"])
+
+            if record.get("disposition") in ("not_represented", "collapsed_into"):
+                removed.update(record.get("bundled_columns", ()))
+
+            if record.get("disposition") == "represented":
+                protected.update(
+                    target["feature_id"]
+                    for target in record.get("targets", ())
+                    if target.get("matrix") == "typological"
+                )
+        removed_operands = removed - protected
+
         redundant_mask = np.isin(self.feats[1], list(removed_operands))
         if redundant_mask.any():
             self.feats[1] = self.feats[1][~redundant_mask]
@@ -563,9 +514,7 @@ class URIELPlusDatabases(BaseURIEL):
         """
             Updates URIEL+ with data from the updated SAPHON database.
 
-
             This function integrates the updated SAPHON data.
-
 
             Args:
                 convert_glottocodes_param (bool): If True, converts language codes to Glottocodes.
@@ -601,7 +550,6 @@ class URIELPlusDatabases(BaseURIEL):
     def integrate_bdproto(self):
         """
             Updates URIEL+ with data from the BDPROTO database.
-
 
             This function integrates the BDPROTO data, converting language codes to Glottocodes if necessary,
             and updates the feature data in URIEL+.
@@ -657,7 +605,6 @@ class URIELPlusDatabases(BaseURIEL):
     def integrate_grambank(self):
         """
             Updates URIEL+ with data from the Grambank database.
-
 
             This function integrates the Grambank data, converting language codes to Glottocodes if necessary,
             and updates the feature data in URIEL+.
@@ -720,7 +667,6 @@ class URIELPlusDatabases(BaseURIEL):
     def integrate_apics(self):
         """
             Updates URIEL+ with data from the APiCS database.
-
 
             This function integrates the APiCS data, converting language codes to Glottocodes if necessary,
             and updates the feature data in URIEL+.
@@ -789,7 +735,6 @@ class URIELPlusDatabases(BaseURIEL):
         """
             Updates URIEL+ with data from the EWAVE database.
 
-
             This function integrates the EWAVE data, converting language codes to Glottocodes if necessary,
             and updates the feature data in URIEL+.
         """
@@ -851,7 +796,6 @@ class URIELPlusDatabases(BaseURIEL):
     def integrate_glottolog(self):
         """
             Updates URIEL+ with data from the Glottolog database.
-
 
             This function integrates the Glottolog data.
         """
@@ -923,10 +867,8 @@ class URIELPlusDatabases(BaseURIEL):
         """
             Updates URIEL+ based on provided databases.
 
-
             Args:
                 *args: Databases to update URIEL+ with.
-
 
             Raises:
                 KeyError: If a provided database name is invalid.

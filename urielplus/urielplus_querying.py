@@ -14,8 +14,14 @@ class URIELPlusQuerying(BaseURIEL):
     @staticmethod
     def _known_values(values):
         """
-            Returns only the known values from an array of source values for a feature - excluding -1
-            (unknown/missing), NaN, positive infinity, and negative infinity.
+            Filters an array of source values for a feature down to only the known values.
+
+            Args:
+                values (np.ndarray): The per-source values for a feature, which may include -1
+                (unknown/missing), NaN, positive infinity, or negative infinity.
+
+            Returns:
+                np.ndarray: The values with -1, NaN, and infinite entries excluded.
         """
         values = np.asarray(values, dtype=float)
         return values[(values != -1.0) & np.isfinite(values)]
@@ -25,14 +31,11 @@ class URIELPlusQuerying(BaseURIEL):
         """
             Maps a distance type to the corresponding loaded features for URIEL+.
 
-
             Args:
                 distance (str): The type of distance to map.
 
-
             Returns:
                 str: The loaded features corresponding to the distance type.
-
 
             Raises:
                 ValueError: If the distance type is not available in URIEL+.
@@ -50,14 +53,13 @@ class URIELPlusQuerying(BaseURIEL):
         raise ValueError(f"{distance} is not an available feature category in URIEL+. Feature categories are {list(d.keys())}.")
 
 
+
     def get_languages_with_distance_data(self, distance_type):
         """
             Retrieves a list of languages that contain at least one non-empty feature of the specified distance type.
 
-
             Args:
                 distance_type (str): The type of distance to check (e.g., genetic, geographic, featural, syntactic).
-
 
             Returns:
                 list: A list of languages.
@@ -106,26 +108,20 @@ class URIELPlusQuerying(BaseURIEL):
     def get_languages_with_geographic_data(self):
         return self.get_languages_with_distance_data("geographic")
 
-
     def get_languages_with_genetic_data(self):
         return self.get_languages_with_distance_data("genetic")
-
 
     def get_languages_with_featural_data(self):
         return self.get_languages_with_distance_data("featural")
 
-
     def get_languages_with_morphological_data(self):
         return self.get_languages_with_distance_data("morphological")
-
 
     def get_languages_with_inventory_data(self):
         return self.get_languages_with_distance_data("inventory")
 
-
     def get_languages_with_phonological_data(self):
         return self.get_languages_with_distance_data("phonological")
-
 
     def get_languages_with_syntactic_data(self):
         return self.get_languages_with_distance_data("syntactic")
@@ -140,15 +136,12 @@ class URIELPlusQuerying(BaseURIEL):
         """
             Retrieves the vectors of the specified category for each language.
 
-
             Args:
                 category (str): The category of features to retrieve.
                 *args: Language codes for which to retrieve vectors.
 
-
             Returns:
                 dict: A dictionary with language codes as keys and vectors as values.
-
 
             Raises:
                 ValueError: If only one language is provided or if the language is unknown.
@@ -195,33 +188,26 @@ class URIELPlusQuerying(BaseURIEL):
     """
         The next eight functions are used to retrieve the vectors of the specified category for each language.
 
-
         Returns:
             dict: A dictionary with language codes as keys and vectors as values.
     """
     def get_geographic_vector(self, *args):
         return self.get_vector("geographic", *args)
 
-
     def get_genetic_vector(self, *args):
         return self.get_vector("genetic", *args)
-
 
     def get_featural_vector(self, *args):
         return self.get_vector("featural", *args)
 
-
     def get_morphological_vector(self, *args):
         return self.get_vector("morphological", *args)
-
 
     def get_inventory_vector(self, *args):
         return self.get_vector("inventory", *args)
 
-
     def get_phonological_vector(self, *args):
         return self.get_vector("phonological", *args)
-
 
     def get_syntactic_vector(self, *args):
         return self.get_vector("syntactic", *args)
@@ -235,7 +221,6 @@ class URIELPlusQuerying(BaseURIEL):
         """
             Processes a single language to compute feature vectors based on shared indices between languages.
 
-
             Args:
                 i (int): Index of the language in the langs list.
                 langs (list): List of language codes.
@@ -245,7 +230,6 @@ class URIELPlusQuerying(BaseURIEL):
                 list_shared_indices (list): List of indices that indicate shared features between languages.
                 vec_num (int): Index of the vector in the shared indices list.
                 distance_type (str): Type of distance being computed.
-
 
             Returns:
                 list: Computed feature vector for the language.
@@ -281,14 +265,12 @@ class URIELPlusQuerying(BaseURIEL):
         """
             Creates feature vectors for a list of languages using shared feature indices.
 
-
             Args:
                 langs (list): List of language codes.
                 database (str): Database of the feature data.
                 list_shared_indices (list): List of indices that indicate shared features between languages.
                 distance_type (str): Type of distance being computed.
                 vec_num (int): Index of the vector in the shared indices list.
-
 
             Returns:
                 tuple: A tuple containing the list of language vectors and the updated vec_num.
@@ -317,15 +299,12 @@ class URIELPlusQuerying(BaseURIEL):
         """
             Computes the angular or cosine distance between two vectors.
 
-
             Args:
                 u (np.ndarray): First vector.
                 v (np.ndarray): Second vector.
 
-
             Returns:
                 float: The computed distance between the vectors.
-
 
             Raises:
                 ValueError: If the vectors are not of the same length.
@@ -353,15 +332,12 @@ class URIELPlusQuerying(BaseURIEL):
         """
             Computes the distance between languages based on a specified feature category.
 
-
             Args:
                 distance (str or list): The distance category or a list of distance categories.
                 *args: Language codes for which to calculate the distance.
 
-
             Returns:
                 list: A list of computed distances between languages or a distance matrix.
-
 
             Raises:
                 ValueError: If only one language is provided or if the language is unknown.
@@ -487,10 +463,8 @@ class URIELPlusQuerying(BaseURIEL):
     """
         The next eight functions are used to compute specific distances between languages.
 
-
         Args:
             *args: Language codes for which to calculate the geographic distance.
-
 
         Returns:
             list: A list of computed distances between languages or a distance matrix.
@@ -498,26 +472,20 @@ class URIELPlusQuerying(BaseURIEL):
     def new_geographic_distance(self, *args):
         return self.new_distance("geographic", *args)
 
-
     def new_genetic_distance(self, *args):
         return self.new_distance("genetic", *args)
-
 
     def new_featural_distance(self, *args):
         return self.new_distance("featural", *args)
 
-
     def new_morphological_distance(self, *args):
         return self.new_distance("morphological", *args)
-
 
     def new_inventory_distance(self, *args):
         return self.new_distance("inventory", *args)
 
-
     def new_phonological_distance(self, *args):
         return self.new_distance("phonological", *args)
-
 
     def new_syntactic_distance(self, *args):
         return self.new_distance("syntactic", *args)
@@ -531,6 +499,9 @@ class URIELPlusQuerying(BaseURIEL):
     def _resolve_custom_feature_index(self, idx):
         """
             Maps a flattened custom-feature index back to the matrix it came from and its position within that matrix's own feature array.
+
+            Args:
+                idx (int): The flattened custom-feature index to resolve.
 
             Returns:
                 tuple: (matrix_index, local_feature_index)
@@ -548,7 +519,6 @@ class URIELPlusQuerying(BaseURIEL):
         """
             Processes a single language to compute feature vectors based on shared indices between languages.
 
-
             Args:
                 i (int): Index of the language in the langs list.
                 langs (list): List of language codes.
@@ -556,7 +526,6 @@ class URIELPlusQuerying(BaseURIEL):
                 list_shared_indices (list): List of indices that indicate shared features between languages.
                 vec_num (int): Index of the vector in the shared indices list.
                 source_num (int): Column of The source to use features from.
-
 
             Returns:
                 list: Computed feature vector for the language.
@@ -598,14 +567,12 @@ class URIELPlusQuerying(BaseURIEL):
         """
             Creates feature vectors for a list of languages using shared feature indices.
 
-
             Args:
                 langs (list): List of language codes.
                 flattened_feats (list): List of all features.
                 list_shared_indices (list): List of indices that indicate shared features between languages.
                 source_num (int): Column of The source to use features from.
                 vec_num (int): Index of the vector in the shared indices list.
-
 
             Returns:
                 tuple: A tuple containing the list of language vectors and the updated vec_num.
@@ -633,17 +600,14 @@ class URIELPlusQuerying(BaseURIEL):
         """
             Computes the distance between languages based on provided features.
 
-
             Args:
                 features (list): A list of features to use data from.
                 *args: Language codes for which to calculate the distance.
                 source (str): The typological source to use features from ('A' for all sources, "ETHNO", "WALS", "PHOIBLE_UPSID",
                 "PHOIBLE_SAPHON", "PHOIBLE_GM", "PHOIBLE_PH", "PHOIBLE_AA", "SSWL", "PHOIBLE_RA", "PHOIBLE_SPA").
 
-
             Returns:
                 list: A list of computed distances between languages or a distance matrix.
-
 
             Raises:
                 ValueError: If a source is unknown or the features inputted are not supported by the source,
@@ -834,14 +798,10 @@ class URIELPlusQuerying(BaseURIEL):
         """
             Prints the number of languages with available data in URIEL+ for the provided resoure-level and distance type.
 
-
             Args:
                 resource_level (str): The resource level of the languages to check feature coverage of. Options are
                 high-resource, medium-resource, and low-resource.
-
-
                 distance_type (str): The type of distance (featural, syntactic, phonological, inventory, morphological, etc.).
-
 
             Returns:
                 list: List of languages of the provided resource-level with available distance type data.
@@ -893,13 +853,11 @@ class URIELPlusQuerying(BaseURIEL):
         """
             Computes the confidence score for the featural distance between two languages.
 
-
             Args:
                 lang1 (str): The first language code.
                 lang2 (str): The second language code.
                 distance_type (str, optional): The type of distance (featural, syntactic, phonological, inventory, or morphological).
                 Default is "featural".
-
 
             Returns:
                 float: The computed confidence scores.
@@ -1008,12 +966,10 @@ class URIELPlusQuerying(BaseURIEL):
         """
             Computes the confidence score for non-featural distances between two languages (genetic, geographic, or script).
 
-
             Args:
                 lang1 (str): The first language code.
                 lang2 (str): The second language code.
                 distance_type (str): The type of distance (genetic or geographic).
-
 
             Returns:
                 float: The computed confidence scores.
@@ -1074,12 +1030,10 @@ class URIELPlusQuerying(BaseURIEL):
         """
             Computes the confidence score for the distance between two languages based on the specified distance type.
 
-
             Args:
                 lang1 (str): The first language code.
                 lang2 (str): The second language code.
                 distance_type (str): The type of distance (featural, syntactic, phonological, inventory, morphological, genetic, geographic, or script).
-
 
             Returns:
                 float: The computed confidence scores.

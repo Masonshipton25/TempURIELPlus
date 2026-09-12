@@ -19,7 +19,7 @@ URIEL+ library for integrating new and updated databases into URIEL and robust d
 Contributors: Aditya Khan (adityakhan@cs.toronto.edu), Mason Shipton (masonshipton25@gmail.com), York Hay Ng (york.ng@mail.utoronto.ca), David Anugraha (anugraha@cs.toronto.edu), Kaiyao Duan (davidduan04@gmail.com), Phuong H. Hoang (fiona.hoang@mail.utoronto.ca), Eric Khiu (erickhiu@umich.edu), Xiang Lu (jameslx@umich.edu), A. Seza Doğruöz (as.dogruoz@ugent.be), En-Shiun Annie Lee (annie.lee@ontariotechu.ca)
 
 
-Last modified: September 8, 2026
+Last modified: September 11, 2026
 '''
 
 
@@ -28,6 +28,11 @@ class URIELPlus(URIELPlusDatabases, URIELPlusImputation, URIELPlusQuerying):
         """
             Initializes the URIEL+ class, setting up vector identifications of languages, and instantiating the classes
             needed for integrating databases, imputing missing values, and querying the knowledge base.
+
+            Raises:
+                FileNotFoundError: If a file is not found in the original_uriel directory.
+                ValueError: If geographic feature matrices contain values other than -1.
+                            If phylogeny, typological, or script feature matrices contain values other than -1, 0, and 1
         """
         self.files = ["family_features.npz", "features.npz", "geocoord_features.npz", "script_features.npz"]
         self.cur_dir = os.path.dirname(os.path.abspath(__file__))
@@ -73,10 +78,22 @@ class URIELPlus(URIELPlusDatabases, URIELPlusImputation, URIELPlusQuerying):
         self._refresh_indexes()
 
 
-    
+
+
+
+
     @staticmethod
     def _valid_linguistic_data(data):
-        """Returns True if every value in data is -1, 0, or 1."""
+        """
+            Checks whether a linguistic (phylogeny, typological, or script) feature matrix contains only
+            valid values.
+
+            Args:
+                data (np.ndarray): The feature data to validate.
+
+            Returns:
+                bool: True if every value in data is -1, 0, or 1.
+        """
         values = np.asarray(data)
         if values.size == 0:
             return True
@@ -85,7 +102,15 @@ class URIELPlus(URIELPlusDatabases, URIELPlusImputation, URIELPlusQuerying):
 
     @staticmethod
     def _valid_geographic_data(data):
-        """Returns True if every value in data is -1 or a finite value from 0 to 1."""
+        """
+            Checks whether a geographic feature matrix contains only valid values.
+
+            Args:
+                data (np.ndarray): The feature data to validate.
+
+            Returns:
+                bool: True if every value in data is -1 or a finite value from 0 to 1.
+        """
         values = np.asarray(data)
         if values.size == 0:
             return True
@@ -93,7 +118,13 @@ class URIELPlus(URIELPlusDatabases, URIELPlusImputation, URIELPlusQuerying):
 
 
     def _refresh_indexes(self, matrix_index=None):
-        """Rebuilds name-to-position lookup tables for the given matrix, or all matrices if None."""
+        """
+            Rebuilds name-to-position lookup tables for the given matrix, or all matrices if None.
+
+            Args:
+                matrix_index (int, optional): The index of the matrix to rebuild lookup tables for. If None,
+                rebuilds lookup tables for all matrices.
+        """
         indexes = range(len(self.feats)) if matrix_index is None else (matrix_index,)
         if matrix_index is None:
             self._feature_index = [None] * len(self.feats)
@@ -107,7 +138,13 @@ class URIELPlus(URIELPlusDatabases, URIELPlusImputation, URIELPlusQuerying):
 
 
     def _sync_loaded_features(self, matrix_index=None):
-        """Keeps database loaded_features in sync with feats, langs, data, and sources for the provided matrix, or all four matrices if None."""
+        """
+            Keeps database loaded_features in sync with feats, langs, data, and sources for the provided matrix,
+            or all four matrices if None.
+
+            Args:
+                matrix_index (int, optional): The index of the matrix to sync. If None, syncs all four matrices.
+        """
         indexes = range(len(self.loaded_features)) if matrix_index is None else (matrix_index,)
         for index in indexes:
             matrix = self.loaded_features[index]
@@ -121,21 +158,16 @@ class URIELPlus(URIELPlusDatabases, URIELPlusImputation, URIELPlusQuerying):
 
 
 
-
-
     def get_loaded_features(self, l_name):
         """
             Returns the URIEL+ loaded features associated with the provided name, if the name is valid.
-
 
             Args:
                 l_name (str): The name of the loaded features to return. Valid options are "phylogeny", "typological",
                 "geography", or "script".
 
-
             Returns:
                 np.ndarray: The corresponding loaded features as a NumPy array.
-
 
             Raises:
                 KeyError: If the name is invalid.
@@ -156,7 +188,6 @@ class URIELPlus(URIELPlusDatabases, URIELPlusImputation, URIELPlusQuerying):
         The following three functions return loaded features representing phylogeny, typological, geography,
         and script vectors, respectively.
 
-
         Returns:
             np.ndarray: The corresponding loaded features as a NumPy array.
     """
@@ -175,26 +206,22 @@ class URIELPlus(URIELPlusDatabases, URIELPlusImputation, URIELPlusQuerying):
     def get_script_loaded_features(self):
         """Returns the script loaded features."""
         return self.loaded_features[3]
-   
+
 
 
     def set_loaded_features(self, l_name, file):
         """
             Updates the loaded features associated with the provided name by loading data from the provided file.
 
-
             Args:
                 l_name (str): The name of the loaded_features to update. Valid options are "phylogeny", "typological",
                 "geography", or "script".
                 file (str): The file name to load the loaded features data from.
 
-
             Raises:
                 KeyError: If the name is invalid.
                 FileNotFoundError: If the file is missing.
                 ValueError: If the data fails validation.
-
-
         """
         l_map = {
             "phylogeny": 0,
@@ -228,11 +255,11 @@ class URIELPlus(URIELPlusDatabases, URIELPlusImputation, URIELPlusQuerying):
         logging.info(f"{l_name} loaded features updated successfully from {file}.")
 
         self._refresh_indexes(l_idx)
-   
+
+
     """
         The following three functions updates loaded features representing phylogeny, typological, geography,
         and script vectors, respectively.
-
 
         Args:
             file (str): The file name to load the loaded features data from.
@@ -241,11 +268,9 @@ class URIELPlus(URIELPlusDatabases, URIELPlusImputation, URIELPlusQuerying):
         """Updates the phylogeny loaded features."""
         self.set_loaded_features("phylogeny", file)
 
-
     def set_typological_loaded_features(self, file):
         """Updates the typological loaded features."""
         self.set_loaded_features("typological", file)
-
 
     def set_geography_loaded_features(self, file):
         """Updates the geography loaded features."""
@@ -264,22 +289,20 @@ class URIELPlus(URIELPlusDatabases, URIELPlusImputation, URIELPlusQuerying):
             Returns the arrays within the URIEL+ loaded features associated with the provided name, if the name is
             valid.
 
-
             Args:
                 l_name (str): The name of the loaded features to return. Valid options are "phylogeny", "typological",
                 "geography", or "script".
-
 
             Returns:
                 tuple: The arrays within the corresponding loaded features as NumPy arrays.
         """
         loaded_features = self.get_loaded_features(l_name)
         return loaded_features["feats"], loaded_features["data"], loaded_features["langs"], loaded_features["sources"]
-   
+
+
     """
         The following three functions return all the arrays within loaded features representing
         phylogeny, typological, geography, and script vectors, respectively.
-
 
         Returns:
             tuple: The arrays within the corresponding loaded features as NumPy arrays.
@@ -307,7 +330,6 @@ class URIELPlus(URIELPlusDatabases, URIELPlusImputation, URIELPlusQuerying):
         The following four functions return all the arrays from all loaded features representing
         features, languages, feature data, and sources, respectively.
 
-
         Returns:
             list: A list of NumPy arrays containing the corresponding arrays from each loaded features.
     """
@@ -333,7 +355,6 @@ class URIELPlus(URIELPlusDatabases, URIELPlusImputation, URIELPlusQuerying):
     """
         The following functions return the array corresponding with a specific loaded features
         and one of either features, languages, data, or sources arrays.
-
 
         Returns:
             np.ndarray: A NumPy array of either the features, languages, data, or sources of a specific loaded
@@ -404,7 +425,7 @@ class URIELPlus(URIELPlusDatabases, URIELPlusImputation, URIELPlusQuerying):
         return self.sources[3]
 
 
-   
+
 
     def reset(self):
         """Restores URIEL+ to the released database, discarding in-memory changes."""

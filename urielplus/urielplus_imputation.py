@@ -16,6 +16,12 @@ precision_score = recall_score = KFold = train_test_split = None
 
 
 def _load_pandas():
+    """
+        Lazily imports and caches pandas, so importing URIELPlus doesn't require it.
+
+        Returns:
+            module: The imported pandas module.
+    """
     global pd
     if pd is None:
         import pandas as pandas_module
@@ -28,6 +34,10 @@ def _load_imputation_dependencies(strategy):
         This function imports the heavy optional dependencies needed for a given imputation strategy, so that
         importing URIELPlus and using its database or query methods never imports pandas, MIDASpy,
         TensorFlow, TensorFlow Addons, fancyimpute, or scikit-learn.
+
+        Args:
+            strategy (str): The imputation strategy to load dependencies for (e.g. "knn", "softimpute",
+            "midas").
 
         Raises:
             ImportError: If strategy is "midas" and running on Python 3.11 or later, or if a required
@@ -88,16 +98,10 @@ def _load_imputation_dependencies(strategy):
     
 
 class URIELPlusImputation(BaseURIEL):
-    def _geneticFill(self, parent_features, child_features):
-        fill_mask = (child_features == -1.0) & (parent_features > -1.0)
-        return np.where(fill_mask, parent_features, child_features)
-    
-    
     def aggregate(self, idx=1):
         """
             Computes the union or average of feature data across sources in URIEL+ and
             optionally performs genetic imputation to fill missing values.
-
 
             The union operation takes the maximum value across sources for each feature and language combination.
             The average operation takes the average across sources for each feature and language combination.
@@ -110,6 +114,9 @@ class URIELPlusImputation(BaseURIEL):
 
             Args:
                 idx (int): The index of the file (typological and features.npz, script and script_features.npz).
+
+            Returns:
+                np.ndarray: The aggregated dataset.
         """
         if self.aggregation == 'U':
             logging.info("Creating union of data across sources....")
@@ -157,8 +164,9 @@ class URIELPlusImputation(BaseURIEL):
                                 if child_idx is not None and child_idx not in visited:
                                     child_features = aggregated_data[child_idx]
                                     before = child_features.copy()
-                                    updated_child_features = self._geneticFill(parent_features, child_features)
-                                    aggregated_data[child_idx] = updated_child_features
+
+                                    fill_mask = (child_features == -1.0) & (parent_features > -1.0)
+                                    updated_child_features = np.where(fill_mask, parent_features, child_features)
 
                                     changed_feats = np.where(updated_child_features != before)[0]
                                     for feat_idx in changed_feats:
@@ -189,11 +197,9 @@ class URIELPlusImputation(BaseURIEL):
         """
             Preprocesses the data by replacing missing values and categorizing features.
 
-
             Args:
                 df (pd.DataFrame): The input data frame.
                 feature_prefixes (tuple): A tuple of prefixes used to categorize features.
-
 
             Returns:
                 tuple: A tuple containing the feature data as a NumPy array and a dictionary categorizing features by type.
@@ -212,11 +218,9 @@ class URIELPlusImputation(BaseURIEL):
         """
             Creates missing values in the dataset based on a specified missing rate.
 
-
             Args:
                 X (np.ndarray): The original dataset.
                 missing_rate (float): The rate of missing values to introduce.
-
 
             Returns:
                 tuple: A tuple containing the dataset with missing values and the indices of the missing values.
@@ -237,12 +241,10 @@ class URIELPlusImputation(BaseURIEL):
         """
             Evaluates the imputation results by comparing the imputed values to the original values.
 
-
             Args:
                 X_test_orig (np.ndarray): The original test dataset.
                 X_test_imputed (np.ndarray): The imputed test dataset.
                 missing_indices (list): The indices of the missing values.
-
 
             Returns:
                 dict: A dictionary containing evaluation metrics (e.g., accuracy, precision, recall, F1 score, RMSE, MAE).
@@ -340,17 +342,14 @@ class URIELPlusImputation(BaseURIEL):
         """
             Evaluates the imputation results by feature type.
 
-
             Args:
                 X_test_orig (np.ndarray): The original test dataset.
                 X_test_imputed (np.ndarray): The imputed test dataset.
                 missing_indices (list): The indices of the missing values.
                 feature_types (dict): A dictionary categorizing features by type.
 
-
             Returns:
                 dict: A dictionary containing evaluation metrics by feature type.
-
 
             Raises:
                 ValueError: If any metric calculations results in errors.
@@ -409,7 +408,6 @@ class URIELPlusImputation(BaseURIEL):
         """
             Imputes missing values in the dataset using a specified hyperparameter.
 
-
             Args:
                 X_train (np.ndarray): The training dataset.
                 X_test (np.ndarray): The test dataset.
@@ -419,7 +417,6 @@ class URIELPlusImputation(BaseURIEL):
                 feature_types (dict): A dictionary categorizing features by type.
                 hyperparameter (int or float): The hyperparameter value for the imputer.
                 eval_metric (str): The evaluation metric to use ("f1", "rmse", etc.).
-
 
             Returns:
                 tuple: A tuple containing the imputed dataset, the hyperparameter used, and the evaluation metric value.
@@ -459,10 +456,8 @@ class URIELPlusImputation(BaseURIEL):
         """
             Performs k-fold cross-validation to evaluate imputation quality using a specified hyperparameter.
 
-
             The function splits the training data into k folds, imputes missing values using the specified strategy
             (e.g., KNN or SoftImpute) with a given hyperparameter, and evaluates the imputation using the specified evaluation metric.
-
 
             Args:
                 X_train (np.ndarray): Training data.
@@ -472,7 +467,6 @@ class URIELPlusImputation(BaseURIEL):
                 eval_metric (str): Metric to evaluate imputation quality ("accuracy", "precision", "recall", "f1", "rmse", "mae").
                 n_splits (int, optional): Number of folds for cross-validation. Defaults to 10.
                 missing_rate (float, optional): Proportion of data to artificially make missing for evaluation. Defaults to 0.2.
-
 
             Returns:
                 tuple: (X_train, hyperparameter, avg_metric[eval_metric])
@@ -523,9 +517,7 @@ class URIELPlusImputation(BaseURIEL):
         """
             Selects the best hyperparameter for an imputation strategy using k-fold cross-validation.
 
-
             The function evaluates different hyperparameters, using cross-validation, and selects the one that optimizes the specified evaluation metric.
-
 
             Args:
                 X_train (np.ndarray): Training data.
@@ -537,7 +529,6 @@ class URIELPlusImputation(BaseURIEL):
                 eval_metric (str, optional): Metric to evaluate imputation quality ("f1", "accuracy", "precision", "recall", "rmse", or "mae").
                 Defaults to "f1".
                 n_splits (int, optional): Number of folds for cross-validation. Defaults to 10.
-
 
             Returns:
                 int or float: The best hyperparameter for the specified strategy based on the evaluation metric.
@@ -559,7 +550,6 @@ class URIELPlusImputation(BaseURIEL):
         """
             Selects the best hyperparameter for a specified imputation strategy using the given evaluation metric.
 
-
             Args:
                 X_train (np.ndarray): The training dataset.
                 X_test (np.ndarray): The test dataset.
@@ -568,7 +558,6 @@ class URIELPlusImputation(BaseURIEL):
                 missing_rate (float): The rate of missing values to simulate for testing.
                 hyperparameter_range (range): The range of hyperparameters to test.
                 eval_metric (str): The evaluation metric to use ("f1", "rmse", etc.).
-
 
             Returns:
                 int or float: The best hyperparameter value.
@@ -584,7 +573,6 @@ class URIELPlusImputation(BaseURIEL):
                                             feature_types, hyperparameter,
                                             eval_metric) for
             hyperparameter in hyperparameter_range)
-
 
         logging.info("Completed parallel processing for hyperparameter selection")
 
@@ -605,7 +593,6 @@ class URIELPlusImputation(BaseURIEL):
         """
             Imputes missing data using a specified imputation strategy.
 
-
             Args:
                 X (np.ndarray or pd.DataFrame): The dataset to impute.
                 imputer_class (class): The imputation class to use (e.g., KNNImputer, SoftImpute).
@@ -617,7 +604,6 @@ class URIELPlusImputation(BaseURIEL):
                 midas_bin_vars (list, optional): List of binary variables for MIDAS imputation. Default is None.
                 on_test_set (bool, optional): Whether the imputation is being performed on a test set. Default is False.
                 file_path_to_save_npz (str, optional): Path to save the imputed data in NPZ format. Default is None.
-
 
             Returns:
                 np.ndarray: The imputed dataset.
@@ -736,7 +722,6 @@ class URIELPlusImputation(BaseURIEL):
         """
             Performs imputation using the best hyperparameter selected through cross-validation.
 
-
             Args:
                 X (np.ndarray): The dataset to impute.
                 strategy (str): The imputation strategy ("knn", "softimpute", etc.).
@@ -745,7 +730,6 @@ class URIELPlusImputation(BaseURIEL):
                 eval_metric (str): The evaluation metric to use ("f1", "rmse", etc.).
                 test_quality (bool, optional): Whether to evaluate the quality of imputation. Default is True.
                 file_path_to_save_npz (str, optional): Path to save the imputed data in NPZ format. Default is None.
-
 
             Returns:
                 np.ndarray: The imputed dataset.
@@ -789,10 +773,8 @@ class URIELPlusImputation(BaseURIEL):
         """
             Preprocesses data for MIDAS imputation by converting the data into the appropriate format.
 
-
             Args:
                 combined_df_u (pd.DataFrame): The input data frame.
-
 
             Returns:
                 tuple: A tuple containing the preprocessed data and the list of binary variables.
@@ -811,11 +793,9 @@ class URIELPlusImputation(BaseURIEL):
         """
             Generates a CSV file from the URIEL+ features dataset.
 
-
             Args:
                 file_path_to_save_npz (str): The path to save the NPZ file.
                 file (str): The file to make a csv of.
-
 
             Returns:
                 pd.DataFrame: The generated data frame.
@@ -850,7 +830,6 @@ class URIELPlusImputation(BaseURIEL):
         """
             Interface for imputing missing values in URIEL+ using different imputation strategies.
 
-
             Args:
                 csv_path (str, optional): Path to the CSV file to load.
                 Default is None.
@@ -870,7 +849,6 @@ class URIELPlusImputation(BaseURIEL):
                 Default is True.
                 save_as_npz (bool, optional): Whether to save the imputed data as an NPZ file.
                 Default is True.
-
 
             Returns:
                 pd.DataFrame: The imputed data frame if return_csv is True; otherwise, None.
@@ -983,7 +961,6 @@ class URIELPlusImputation(BaseURIEL):
         _ = self.imputation_interface(strategy="midas", file="script_features.npz", feature_prefixes=("SC_",), save_as_npz=False, test_quality=True, eval_metric=eval_metric)
         _ = self.imputation_interface(strategy="midas", file="script_features.npz", feature_prefixes=("SC_",), save_as_npz=True, test_quality=False, eval_metric=eval_metric)
 
-
     def knn_imputation(self):
         """Imputes missing values in URIEL+ data using k-nearest-neighbour imputation."""
         if self.aggregation == 'U':
@@ -993,8 +970,6 @@ class URIELPlusImputation(BaseURIEL):
         _ = self.imputation_interface(strategy="knn", save_as_npz=True, test_quality=True, eval_metric=eval_metric, hyperparameter_range=(3, 6, 9, 12, 15))
         _ = self.imputation_interface(strategy="knn", file="script_features.npz", feature_prefixes=("SC_",), save_as_npz=False, test_quality=True, eval_metric=eval_metric)
         _ = self.imputation_interface(strategy="knn", file="script_features.npz", feature_prefixes=("SC_",), save_as_npz=True, test_quality=False, eval_metric=eval_metric)
-
-
 
     def softimpute_imputation(self):
         """Imputes missing values in URIEL+ data using softImpute imputation."""
@@ -1006,7 +981,6 @@ class URIELPlusImputation(BaseURIEL):
         _ = self.imputation_interface(strategy="softimpute", file="features.npz", feature_prefixes=("S_", "P_", "INV_", "M_"), save_as_npz=True, test_quality=False, eval_metric=eval_metric)
         _ = self.imputation_interface(strategy="softimpute", file="script_features.npz", feature_prefixes=("SC_",), save_as_npz=False, test_quality=True, eval_metric=eval_metric)
         _ = self.imputation_interface(strategy="softimpute", file="script_features.npz", feature_prefixes=("SC_",), save_as_npz=True, test_quality=False, eval_metric=eval_metric)
-
 
     def mean_imputation(self):
         """Imputes missing values in URIEL+ data using mean imputation."""
