@@ -78,71 +78,93 @@ class URIELPlusDatabases(BaseURIEL):
         return database.upper() in all_sources
 
 
-    def _calculate_phylogeny_vectors(self):
+
+    @staticmethod
+    def _lineage_parts(value):
         """
-            This function reads the relevant CSV file and updates the phylogeny arrays based on the full lineage
-            of new languages. Each lineage node, from root to leaf, becomes its own path-qualified feature
-            (F_<root> > <child> > ... > <node>), and every ancestor node in a language's lineage is set to 1.
-            
-            If caching is enabled, updates the "family_features.npz" file.
+            Splits a raw lineage string into its trimmed path components, root to leaf.
+
+            Args:
+                value: The raw lineage value from lang_fam_geo.csv (may be NaN/None/"<NA>").
+
+            Returns:
+                tuple: The non-empty, stripped lineage components, in root-to-leaf order.
+        """
+        if value is None or (isinstance(value, float) and math.isnan(value)):
+            return ()
+        return tuple(part.strip() for part in str(value).split(",") if part.strip() and part.strip() != "<NA>")
+
+
+    def _selected_family_metadata(self):
+        """
+            Loads lang_fam_geo.csv and, for languages with more than one row, keeps only the row with the
+            deepest (most specific) lineage.
+
+            Returns:
+                tuple: (full DataFrame with every CSV row, DataFrame indexed by language_id holding
+                only the selected row per language).
         """
         csv_path = os.path.join(self.cur_dir, "database", "urielplus_csvs", "lang_fam_geo.csv")
-        fam_geo_feat_csv = pd.read_csv(csv_path)
-        fam_geo_feat_csv.columns = fam_geo_feat_csv.columns.str.strip('"')
+        frame = pd.read_csv(csv_path, dtype={"language_id": "string", "language_name": "string", "lineage": "string"})
+        frame.columns = frame.columns.str.strip('"')
+        frame["language_id"] = frame["language_id"].str.strip()
 
-        new_langs = np.setdiff1d(self.langs[1], self.langs[0])
+        frame["_depth"] = frame["lineage"].fillna("").map(
+            lambda value: len([part for part in str(value).split(",") if part.strip()])
+        )
+        selected = (
+            frame.sort_values(["language_id", "_depth"], ascending=[True, False], kind="stable")
+            .drop_duplicates("language_id", keep="first")
+            .set_index("language_id", drop=False)
+        )
+        return frame, selected
 
-        # Work out each new language's lineage path (if any) and collect every brand-new path-qualified feature name across the whole batch, without touching any array yet.
-        existing_feats = set(self.feats[0].tolist())
-        lang_paths = [None] * len(new_langs)
-        new_feature_order = []
-        seen_new_features = set()
 
-        for i, l in enumerate(new_langs):
-            row = fam_geo_feat_csv.loc[fam_geo_feat_csv["language_id"] == l]
-            if row.empty:
+    def _calculate_phylogeny_vectors(self):
+        """
+            Rebuilds the full family-features matrix from lang_fam_geo.csv. Every lineage prefix across
+            every language becomes its own path-qualified feature (F_<root> > <child> > ... > <node>).
+            The source axis is labelled "GLOTTOLOG_DERIVED".
+            
+            If caching is enabled, overwrites the "family_features.npz" file.
+
+            Raises:
+                ValueError: If the family source does not yield 8,887 path-qualified nodes or 8,582 direct parent relations.
+        """
+        frame, selected = self._selected_family_metadata()
+
+        paths = set()
+        for lineage in frame["lineage"]:
+            parts = self._lineage_parts(lineage)
+            paths.update(parts[:depth] for depth in range(1, len(parts) + 1))
+        ordered_paths = sorted(paths, key=lambda path: (len(path), " > ".join(path)))
+
+        if len(ordered_paths) != 8887:
+            raise ValueError(f"the family source must yield 8,887 path-qualified nodes, found {len(ordered_paths)}")
+        edge_count = sum(len(path) > 1 for path in ordered_paths)
+        if edge_count != 8582:
+            raise ValueError(f"the family source must yield 8,582 direct parent relations, found {edge_count}")
+
+        features = np.asarray(["F_" + " > ".join(path) for path in ordered_paths], dtype=str)
+        path_index = {path: idx for idx, path in enumerate(ordered_paths)}
+
+        languages = np.asarray(self.langs[1], dtype=str)
+        data = np.full((len(languages), len(features), 1), -1, dtype=np.int8)
+
+        for row, language in enumerate(languages):
+            if language not in selected.index:
                 continue
-
-            lineage_value = row["lineage"].values[0]
-            if not isinstance(lineage_value, str) or not lineage_value.strip():
-                continue
-
-            parts = [part.strip() for part in lineage_value.split(",") if part.strip()]
+            parts = self._lineage_parts(selected.at[language, "lineage"])
             if not parts:
                 continue
+            data[row, :, 0] = 0
+            indices = [path_index[parts[:depth]] for depth in range(1, len(parts) + 1)]
+            data[row, indices, 0] = 1
 
-            path_features = []
-            path = []
-            for part in parts:
-                path.append(part)
-                fam_string = "F_" + " > ".join(path)
-                path_features.append(fam_string)
-                if fam_string not in existing_feats and fam_string not in seen_new_features:
-                    seen_new_features.add(fam_string)
-                    new_feature_order.append(fam_string)
-
-            lang_paths[i] = path_features
-
-        # Batch-resize once, for every new language row and every new feature column together.
-        self.data[0] = self._set_new_data_dimensions(self.data[0], new_feature_order, list(new_langs), [])
-        self.feats[0] = np.append(self.feats[0], new_feature_order)
-        self.langs[0] = np.append(self.langs[0], new_langs)
-
-        feature_position = {str(feat): idx for idx, feat in enumerate(self.feats[0])}
-
-        # Fill in values now that the array is already at its final shape. ---
-        for i, path_features in enumerate(lang_paths):
-            if path_features is None:
-                continue  # no usable lineage; row stays at the default -1 (unknown) for every feature
-
-            new_lang_idx = -len(new_langs) + i
-
-            # Every existing family node is known to be absent for this language unless proven present below.
-            self.data[0][new_lang_idx, :, -1] = 0.0
-
-            for fam_string in path_features:
-                family_idx = feature_position[fam_string]
-                self.data[0][new_lang_idx, family_idx, -1] = 1.0
+        self.feats[0] = features
+        self.langs[0] = languages
+        self.data[0] = data
+        self.sources[0] = np.asarray(["GLOTTOLOG_DERIVED"])
 
         if self.cache:
             np.savez(os.path.join(self.cur_dir, "database", self.files[0]), feats=self.feats[0], data=self.data[0], langs=self.langs[0], sources=self.sources[0])
@@ -153,28 +175,30 @@ class URIELPlusDatabases(BaseURIEL):
 
     def _calculate_geocoord_vectors(self):
         """
-            This function calculates geographic distance vectors between new languages and existing geocoordinates.
-            Each new language gets a vector of distances to all known coordinates (in km), normalized by Earth's
-            antipodal distance (π x 6371.0 km).
-            Uses the provided getGreatCircleDistance function for great-circle distance.
+            Rebuilds the full geography-features matrix from scratch using the great-circle distance
+            (in km, via the Haversine calculation), normalized by Earth's antipodal distance
+            (π x 6371.0 km). Every language gets a distance to a fixed set of reference
+            anchors, which are read from the "original_uriel/geocoord_features.npz".
+            Feature names use the "G_DISTANCE_TO_LATITUDE_<lat>_LONGITUDE_<lon>" format and the source
+            axis is labelled "GLOTTOLOG_DERIVED".
 
-            If caching is enabled, updates the `geocoord_features.npz` file.
+            If caching is enabled, overwrites the `geocoord_features.npz` file.
         """
-        new_langs = np.setdiff1d(self.langs[1], self.langs[2])
-        self.langs[2] = np.append(self.langs[2], new_langs)
-        self.data[2] = self._set_new_data_dimensions(self.data[2], [], new_langs, [])
+        _frame, selected = self._selected_family_metadata()
 
-        coords = [list(map(float, re.findall(r"-?\d+(?:\.\d+)?", feat))) for feat in self.feats[2]]
+        with np.load(os.path.join(self.cur_dir, "database", "original_uriel", "geocoord_features.npz"),
+                     allow_pickle=False) as archive:
+            original_features = archive["feats"].astype(str)
 
-        csv_path = os.path.join(self.cur_dir, "database", "urielplus_csvs", "lang_fam_geo.csv")
-        fam_geo_feat_csv = pd.read_csv(csv_path)
-        fam_geo_feat_csv.columns = fam_geo_feat_csv.columns.str.strip('"')
-        fam_geo_feat_csv["latitude"] = pd.to_numeric(fam_geo_feat_csv["latitude"], errors="coerce")
-        fam_geo_feat_csv["longitude"] = pd.to_numeric(fam_geo_feat_csv["longitude"], errors="coerce")
-        fam_geo_feat_csv["longitude"] = fam_geo_feat_csv["longitude"].apply(
-            lambda x: x - 360 if x > 180 else (x + 360 if x < -180 else x)
-        )
-        fam_geo_feat_csv["latitude"] = fam_geo_feat_csv["latitude"].apply(lambda x: max(min(x, 90), -90))
+        anchors = []
+        features = []
+        for feat in original_features:
+            match = re.fullmatch(r"GC_(-?\d+(?:\.\d+)?)_(-?\d+(?:\.\d+)?)", feat)
+            if match is None:
+                raise ValueError(f"invalid original geographic reference feature: {feat!r}")
+            latitude, longitude = match.groups()
+            anchors.append((float(latitude), float(longitude)))
+            features.append(f"G_DISTANCE_TO_LATITUDE_{latitude}_LONGITUDE_{longitude}")
 
         MAX_DIST = math.pi * 6371.000  # Earth's antipodal distance, ~20015.1 km
 
@@ -194,29 +218,28 @@ class URIELPlusDatabases(BaseURIEL):
             c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
             return 6371.000 * c
 
-        for i, l in enumerate(new_langs):
+        languages = np.asarray(self.langs[1], dtype=str)
+        data = np.full((len(languages), len(features), 1), -1.0, dtype=np.float32)
+
+        for row, language in enumerate(languages):
+            if language not in selected.index:
+                continue
+
+            lat = pd.to_numeric(selected.at[language, "latitude"], errors="coerce")
+            lon = pd.to_numeric(selected.at[language, "longitude"], errors="coerce")
+            if pd.isna(lat) or pd.isna(lon):
+                continue
+
             try:
-                row = fam_geo_feat_csv.loc[fam_geo_feat_csv["language_id"].str.strip('"') == l]
-                if row.empty:
-                    self.data[2][-len(new_langs) + i, :, -1] = -1.0
-                    continue
-
-                lat, lon = row["latitude"].values[0], row["longitude"].values[0]
-                if pd.isna(lat) or pd.isna(lon):
-                    self.data[2][-len(new_langs) + i, :, -1] = -1.0
-                    continue
-
-                distances = []
-                for c in coords:
-                    if np.isnan(c[0]) or np.isnan(c[1]):
-                        distances.append(-1.0)
-                    else:
-                        distances.append(getGreatCircleDistance(lat, lon, c[0], c[1]) / MAX_DIST)
-
-                self.data[2][-len(new_langs) + i, :, -1] = np.array(distances, dtype=np.float32)
-
+                distances = [getGreatCircleDistance(lat, lon, a_lat, a_lon) / MAX_DIST for a_lat, a_lon in anchors]
+                data[row, :, 0] = np.array(distances, dtype=np.float32)
             except Exception:
-                self.data[2][-len(new_langs) + i, :, -1] = -1.0
+                data[row, :, 0] = -1.0
+
+        self.feats[2] = np.asarray(features, dtype=str)
+        self.langs[2] = languages
+        self.data[2] = data
+        self.sources[2] = np.asarray(["GLOTTOLOG_DERIVED"])
 
         if self.cache:
             np.savez(os.path.join(self.cur_dir, "database", self.files[2]), feats=self.feats[2], data=self.data[2], langs=self.langs[2], sources=self.sources[2])
@@ -227,42 +250,93 @@ class URIELPlusDatabases(BaseURIEL):
 
     def _calculate_script_vectors(self):
         """
-            This function calculates script vectors for new languages.
+            Rebuilds the full script-features matrix from script_data.csv over the whole language axis
+            (self.langs[1]), then applies every "SCRIPTSOURCE" rule in feature_mappings.json that targets
+            the "script" matrix: bundled operand columns feeding an "exact_collapse" record are combined
+            into their target feature via a three-valued OR (1 if any operand is 1, 0 if every operand is
+            known and 0, otherwise -1), and any raw column whose disposition is "not_represented" or
+            "collapsed_into" is dropped from the exposed feature set. The source axis is labelled
+            "SCRIPTSOURCE_DERIVED".
 
-            If caching is enabled, updates the `script_features.npz` file.
+            If caching is enabled, overwrites the `script_features.npz` file.
         """
+        self._ensure_feature_mappings()
+
         csv_path = os.path.join(self.cur_dir, "database", "urielplus_csvs", "script_data.csv")
         script_csv = pd.read_csv(csv_path)
         script_csv.columns = script_csv.columns.str.strip('"')
-        script_csv['language_id'] = script_csv['language_id'].str.strip('"')
+        script_csv["language_id"] = script_csv["language_id"].str.strip('"')
 
-        script_feat_cols = [col for col in script_csv.columns if col not in ['language_id', 'language_name']]
+        raw_columns = [col for col in script_csv.columns if col not in ("language_id", "language_name")]
+        column_position = {col: idx for idx, col in enumerate(raw_columns)}
 
-        missing_feats = [f for f in script_feat_cols if f not in self.feats[3]]
-        if missing_feats:
-            self.data[3] = self._set_new_data_dimensions(self.data[3], missing_feats, [], [])
-            self.feats[3] = np.append(self.feats[3], missing_feats)
+        languages = np.asarray(self.langs[1], dtype=str)
+        data = np.full((len(languages), len(raw_columns), 1), -1.0, dtype=np.float32)
 
-        new_langs = np.setdiff1d(self.langs[1], self.langs[3])
-        self.langs[3] = np.append(self.langs[3], new_langs)
-        self.data[3] = self._set_new_data_dimensions(self.data[3], [], new_langs, [])
+        row_by_language = {str(lang).strip('"'): i for i, lang in enumerate(script_csv["language_id"])}
+        for row, language in enumerate(languages):
+            source_row = row_by_language.get(language)
+            if source_row is None:
+                continue
+            for col in raw_columns:
+                data[row, column_position[col], 0] = float(script_csv.at[source_row, col])
 
-        feat_position = {str(f): idx for idx, f in enumerate(self.feats[3])}
+        # --- Apply SCRIPTSOURCE exact-collapse rules restricted to the "script" matrix ---
+        removed = set()
+        for record in self.feature_mappings:
+            if record.get("database") != "SCRIPTSOURCE":
+                continue
 
-        for i, lang in enumerate(new_langs):
-            lang_row = script_csv.loc[script_csv['language_id'] == lang]
-            new_lang_idx = -len(new_langs) + i
+            if record.get("disposition") in ("not_represented", "collapsed_into"):
+                removed.update(record.get("bundled_columns", ()))
 
-            self.data[3][new_lang_idx, :, -1] = -1.0
-            if not lang_row.empty:
-                for col in script_feat_cols:
-                    self.data[3][new_lang_idx, feat_position[col], -1] = float(lang_row[col].values[0])
+            if record.get("relationship") != "exact_collapse":
+                continue
+
+            for target in record.get("targets", ()):
+                if target.get("matrix") != "script":
+                    continue
+
+                expression = target["expression"]
+                match = re.compile(r"^OR\((.*)\)$").fullmatch(str(expression).strip())
+                if match is None:
+                    raise ValueError(f"unsupported exact-collapse expression: {expression!r}")
+                operands = tuple(part.strip() for part in match.group(1).split(","))
+                if any(op not in column_position for op in operands):
+                    continue  # operand not present in this build yet; nothing to collapse for this target
+
+                operand_indices = [column_position[op] for op in operands]
+                operand_values = data[:, operand_indices, 0]
+                collapsed = np.where(
+                    np.any(operand_values == 1, axis=1), 1,
+                    np.where(np.all(operand_values == 0, axis=1), 0, -1)
+                )
+
+                target_feature = target["feature_id"]
+                if target_feature not in column_position:
+                    data = np.concatenate([data, np.full((len(languages), 1, 1), -1.0, dtype=np.float32)], axis=1)
+                    raw_columns.append(target_feature)
+                    column_position[target_feature] = len(raw_columns) - 1
+
+                target_index = column_position[target_feature]
+                data[:, target_index, 0] = np.maximum(data[:, target_index, 0], collapsed)
+
+        # --- Drop raw columns that were bundled into a derived feature or explicitly not represented ---
+        keep_mask = np.array([col not in removed for col in raw_columns])
+        features = np.asarray(raw_columns, dtype=str)[keep_mask]
+        data = data[:, keep_mask, :]
+
+        self.feats[3] = features
+        self.langs[3] = languages
+        self.data[3] = data
+        self.sources[3] = np.asarray(["SCRIPTSOURCE_DERIVED"])
 
         if self.cache:
             np.savez(os.path.join(self.cur_dir, "database", self.files[3]), feats=self.feats[3], data=self.data[3], langs=self.langs[3], sources=self.sources[3])
 
         self._sync_loaded_features(3)
         self._refresh_indexes(3)
+
 
 
     def _get_or_create_derived_source(self):
