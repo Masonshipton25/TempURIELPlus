@@ -49,7 +49,9 @@ class URIELPlusQuerying(BaseURIEL):
         "morphological": 1,
         "script": 3,}
         if distance in d.keys():
-            return d[distance]
+            idx = d[distance]
+            self._apply_ewave_restriction_if_enabled(self.data[idx], self.langs[idx], self.feats[idx], idx=idx)
+            return idx
         raise ValueError(f"{distance} is not an available feature category in URIEL+. Feature categories are {list(d.keys())}.")
 
 

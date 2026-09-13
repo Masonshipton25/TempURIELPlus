@@ -498,7 +498,7 @@ class URIELPlusDatabases(BaseURIEL):
             if not is_global:
                 source_matches = np.where(self.sources[1] == record.get("source_layer"))[0]
                 if len(source_matches) == 0:
-                    continue  # this record's source isn't part of the current build yet
+                    continue  # this record's source is not part of the current build yet
                 source_index = source_matches[0]
 
             for target in targets:

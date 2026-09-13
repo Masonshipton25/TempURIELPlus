@@ -17,7 +17,7 @@ precision_score = recall_score = KFold = train_test_split = None
 
 def _load_pandas():
     """
-        Lazily imports and caches pandas, so importing URIELPlus doesn't require it.
+        Lazily imports and caches pandas, so importing URIELPlus does not require it.
 
         Returns:
             module: The imported pandas module.
@@ -118,6 +118,8 @@ class URIELPlusImputation(BaseURIEL):
             Returns:
                 np.ndarray: The aggregated dataset.
         """
+        self._apply_ewave_restriction_if_enabled(self.data[idx], self.langs[idx], self.feats[idx], idx=idx)
+
         if self.aggregation == 'U':
             logging.info("Creating union of data across sources....")
             aggregated_data = np.max(self.data[idx], axis=-1)
@@ -176,7 +178,9 @@ class URIELPlusImputation(BaseURIEL):
                                     queue.append(child_idx)
                 logging.info(f"Genetic imputation filled {len(self.lineage_imputed_indices)} values.")
                 logging.info("Genetic imputation finished.")
-       
+
+        self._apply_ewave_restriction_if_enabled(aggregated_data, self.langs[idx], self.feats[idx], idx=idx)
+
         if self.aggregation == 'U':
             aggregated_data = np.expand_dims(aggregated_data, axis=-1)
        
@@ -919,6 +923,11 @@ class URIELPlusImputation(BaseURIEL):
                                         strategy=strategy,
                                         feature_types=feature_types,
                                         file_path_to_save_npz=file_path_to_save_npz)
+
+        if file == "features.npz":
+            self._apply_ewave_restriction_if_enabled(
+                imputed, old_combined_df_u["language"].astype(str).to_numpy(), combined_df_u.columns, idx=1
+            )
 
         if self.aggregation == 'U':
             imputed = np.round(imputed)
