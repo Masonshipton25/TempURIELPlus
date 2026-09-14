@@ -827,6 +827,127 @@ class URIELPlusImputation(BaseURIEL):
         return combined_df
 
 
+    def _run_imputation_strategy(self, combined_df_u, strategy, feature_prefixes,
+                             hyperparameter_range, eval_metric, test_quality, file_path_to_save_npz):
+        """
+        Runs imputation using the specified strategy.
+
+        Args:
+            combined_df_u (pd.DataFrame): The feature data to impute.
+            strategy (str): The imputation strategy ("mean", "knn", "softimpute", "midas", etc.).
+            feature_prefixes (tuple): A tuple of prefixes used to categorize features by type.
+            hyperparameter_range (range or None): The range of hyperparameters to test for strategies such as "knn" and "softimpute".
+            eval_metric (str): The evaluation metric to use ("f1", "rmse", etc.).
+            test_quality (bool): Whether to evaluate the quality of imputation.
+            file_path_to_save_npz (str): The path to save imputation results and metrics.
+
+        Returns:
+            np.ndarray: The imputed dataset.
+        """
+        X, feature_types = self._preprocess_data(combined_df_u, feature_prefixes)
+        if strategy in ["knn", "softimpute"] and hyperparameter_range is not None:
+            imputed = self._hyperparameter_imputation(X=X, strategy=strategy,
+                                                feature_types=feature_types,
+                                                hyperparameter_range=hyperparameter_range,
+                                                eval_metric=eval_metric,
+                                                test_quality=test_quality,
+                                                file_path_to_save_npz=file_path_to_save_npz)
+        elif strategy == "midas":
+            data_in, bin_vars = self._preprocess_midas(combined_df_u)
+            X, feature_types = self._preprocess_data(data_in, feature_prefixes)
+            if test_quality:
+                X_missing, missing_indices = self._create_missing_values(X,
+                                                                missing_rate=0.2)
+                # turn X_missing back into dataframe
+                X_missing_df = pd.DataFrame(X_missing, columns=data_in.columns)
+                X_missing_df, bin_vars = self._preprocess_midas(X_missing_df)
+                imputed = self._standard_impute(X=data_in, imputer_class=None,
+                                        strategy=strategy, X_missing=X_missing_df,
+                                        feature_types=feature_types,
+                                        missing_indices=missing_indices,
+                                        midas_bin_vars=bin_vars,
+                                        file_path_to_save_npz=file_path_to_save_npz)
+            else:
+                imputed = self._standard_impute(X=data_in, imputer_class=None,
+                                        strategy=strategy,
+                                        feature_types=feature_types,
+                                        midas_bin_vars=bin_vars,
+                                        file_path_to_save_npz=file_path_to_save_npz)
+        else:
+            if test_quality:
+                X_missing, missing_indices = self._create_missing_values(X,
+                                                                missing_rate=0.2)
+                imputer_class = SoftImpute if strategy == "softimpute" else SimpleImputer
+                imputed = self._standard_impute(X=X, imputer_class=imputer_class,
+                                        strategy=strategy, X_missing=X_missing,
+                                        feature_types=feature_types,
+                                        missing_indices=missing_indices,
+                                        file_path_to_save_npz=file_path_to_save_npz)
+            else:
+                imputer_class = SoftImpute if strategy == "softimpute" else SimpleImputer
+                imputed = self._standard_impute(X=X, imputer_class=imputer_class,
+                                        strategy=strategy,
+                                        feature_types=feature_types,
+                                        file_path_to_save_npz=file_path_to_save_npz)
+        return imputed
+
+
+    def _impute_features_with_ewave_split(self, combined_df_u, old_combined_df_u, strategy, feature_prefixes,
+                                      hyperparameter_range, eval_metric, test_quality, file_path_to_save_npz):
+        """
+        Imputes features with eWAVE-specific columns separated from the remaining features.
+
+        Args:
+            combined_df_u (pd.DataFrame): The full feature data to impute.
+            old_combined_df_u (pd.DataFrame): The original feature data including the language column.
+            strategy (str): The imputation strategy ("softimpute" or "midas").
+            feature_prefixes (tuple): A tuple of prefixes used to categorize features by type.
+            hyperparameter_range (range or None): The range of hyperparameters to test for "softimpute".
+            eval_metric (str): The evaluation metric to use ("f1", "rmse", etc.).
+            test_quality (bool): Whether to evaluate the quality of imputation.
+            file_path_to_save_npz (str): The path to save imputation results and metrics.
+
+        Returns:
+            np.ndarray: The imputed dataset.
+        """
+        if self.ewave_scope_langs is None or self.ewave_scope_feats is None:
+            csv_path = os.path.join(self.cur_dir, "database", "urielplus_csvs", "english_dialect_data.csv")
+            df = pd.read_csv(csv_path)
+ 
+            self.ewave_scope_langs = set(df["language_id"].astype(str)) | {"stan1293"}
+            self.ewave_scope_feats = set(df.columns[1:])
+
+        ewave_cols = [c for c in combined_df_u.columns if c in self.ewave_scope_feats]
+
+        if not ewave_cols:
+            return self._run_imputation_strategy(combined_df_u, strategy, feature_prefixes,
+                                             hyperparameter_range, eval_metric, test_quality, file_path_to_save_npz)
+
+        non_ewave_cols = [c for c in combined_df_u.columns if c not in self.ewave_scope_feats]
+        ewave_langs = self.ewave_scope_langs
+        lang_mask = old_combined_df_u["language"].astype(str).isin(ewave_langs).to_numpy()
+
+        imputed = np.full((len(combined_df_u), len(combined_df_u.columns)), -1.0)
+        col_position = {col: i for i, col in enumerate(combined_df_u.columns)}
+
+        imputed_non_ewave = self._run_imputation_strategy(combined_df_u[non_ewave_cols], strategy, feature_prefixes,
+                                                       hyperparameter_range, eval_metric, test_quality,
+                                                       file_path_to_save_npz)
+        for j, col in enumerate(non_ewave_cols):
+            imputed[:, col_position[col]] = imputed_non_ewave[:, j]
+
+        if lang_mask.any():
+            ewave_subset_df = combined_df_u.loc[lang_mask, ewave_cols].reset_index(drop=True)
+            imputed_ewave = self._run_imputation_strategy(ewave_subset_df, strategy, feature_prefixes,
+                                                       hyperparameter_range, eval_metric, test_quality,
+                                                       file_path_to_save_npz)
+            lang_row_positions = np.where(lang_mask)[0]
+            for j, col in enumerate(ewave_cols):
+                imputed[lang_row_positions, col_position[col]] = imputed_ewave[:, j]
+
+        return imputed
+
+
     def imputation_interface(self, csv_path=None, strategy="softimpute", file_path_to_save_npz=None, file="features.npz",
                          feature_prefixes=("S_", "P_", "INV_", "M_"),
                          eval_metric="f1", hyperparameter_range=None,
@@ -878,55 +999,23 @@ class URIELPlusImputation(BaseURIEL):
         old_combined_df_u = combined_df_u.copy()
         combined_df_u = combined_df_u.drop(combined_df_u.columns[0], axis=1)
 
-        X, feature_types = self._preprocess_data(combined_df_u, feature_prefixes)
-        if strategy in ["knn", "softimpute"] and hyperparameter_range is not None:
-            imputed = self._hyperparameter_imputation(X=X, strategy=strategy,
-                                                feature_types=feature_types,
-                                                hyperparameter_range=hyperparameter_range,
-                                                eval_metric=eval_metric,
-                                                test_quality=test_quality,
-                                                file_path_to_save_npz=file_path_to_save_npz)
-        elif strategy == "midas":
-            data_in, bin_vars = self._preprocess_midas(combined_df_u)
-            X, feature_types = self._preprocess_data(data_in, feature_prefixes)
-            if test_quality:
-                X_missing, missing_indices = self._create_missing_values(X,
-                                                                missing_rate=0.2)
-                # turn X_missing back into dataframe
-                X_missing_df = pd.DataFrame(X_missing, columns=data_in.columns)
-                X_missing_df, bin_vars = self._preprocess_midas(X_missing_df)
-                imputed = self._standard_impute(X=data_in, imputer_class=None,
-                                        strategy=strategy, X_missing=X_missing_df,
-                                        feature_types=feature_types,
-                                        missing_indices=missing_indices,
-                                        midas_bin_vars=bin_vars,
-                                        file_path_to_save_npz=file_path_to_save_npz)
-            else:
-                imputed = self._standard_impute(X=data_in, imputer_class=None,
-                                        strategy=strategy,
-                                        feature_types=feature_types,
-                                        midas_bin_vars=bin_vars,
-                                        file_path_to_save_npz=file_path_to_save_npz)
+        use_ewave_split = (
+            file == "features.npz"
+            and strategy in ("softimpute", "midas")
+            and self.restrict_ewave_to_own_languages
+        )
+        if use_ewave_split:
+            imputed = self._impute_features_with_ewave_split(combined_df_u, old_combined_df_u, strategy, feature_prefixes,
+                                                          hyperparameter_range, eval_metric, test_quality,
+                                                          file_path_to_save_npz)
         else:
-            if test_quality:
-                X_missing, missing_indices = self._create_missing_values(X,
-                                                                missing_rate=0.2)
-                imputer_class = SoftImpute if strategy == "softimpute" else SimpleImputer
-                imputed = self._standard_impute(X=X, imputer_class=imputer_class,
-                                        strategy=strategy, X_missing=X_missing,
-                                        feature_types=feature_types,
-                                        missing_indices=missing_indices,
-                                        file_path_to_save_npz=file_path_to_save_npz)
-            else:
-                imputer_class = SoftImpute if strategy == "softimpute" else SimpleImputer
-                imputed = self._standard_impute(X=X, imputer_class=imputer_class,
-                                        strategy=strategy,
-                                        feature_types=feature_types,
-                                        file_path_to_save_npz=file_path_to_save_npz)
+            imputed = self._run_imputation_strategy(combined_df_u, strategy, feature_prefixes,
+                                                 hyperparameter_range, eval_metric, test_quality,
+                                                 file_path_to_save_npz)
 
         if file == "features.npz":
             self._apply_ewave_restriction_if_enabled(
-                imputed, old_combined_df_u["language"].astype(str).to_numpy(), combined_df_u.columns, idx=1
+                imputed, old_combined_df_u["language"].astype(str).to_numpy(), combined_df_u.columns, idx=1,
             )
 
         if self.aggregation == 'U':
