@@ -132,21 +132,17 @@ Contributors: [Aditya Khan](mailto:adityakhan@cs.toronto.edu), [Mason Shipton](m
 ## Contents
 
 + [Environment](#environment)
-+ [Database Schema](#database-schema)
 + [Setup Instruction](#setup-instruction)
 + [Configuration Options Examples](#configuration-options-examples)
 + [Retrieving Loaded Features Examples](#retrieving-loaded-features-examples)
 + [Database Integration Examples](#database-integration-examples)
++ [Language Codes Examples](#language-codes-examples)
 + [Imputation Examples](#imputation-examples)
 + [Language Distance Calculation Examples](#language-distance-calculation-examples)
 
 ## Environment
 
 The core package is tested on Python 3.10, 3.11, and 3.12. It does not require TensorFlow, TensorFlow Addons, MIDASpy, or the optional imputation libraries.
-
-## Database Schema
-
-Feature identifiers describe linguistic or geographic meaning rather than their source database or construction mechanism. Value encoding, feature domains, source layers, lineage paths, and geographic vectors are defined in [SCHEMA.md](SCHEMA.md).
 
 ## Setup Instruction
 
@@ -178,6 +174,8 @@ Feature identifiers describe linguistic or geographic meaning rather than their 
     - Aggregation Method: Choose the method for aggregating data across sources ('U' for unweighted, 'A' for weighted).
     - Fill Missing Data: Decide whether to fill missing data using parent language data (True or False).
     - Distance Metric: Specify the distance metric to be used ("angular" or "cosine").
+    - Include Lineage In Eval: Decide whether values filled in via parent language (lineage) data during imputation are included when evaluating imputation quality (True or False).
+    - Restrict eWAVE To Own Languages: Decide whether eWAVE-exclusive features are restricted to eWAVE's own languages (plus `"stan1293"`) (True or False).
 
 + Changing A Configuration:
     ```python
@@ -189,9 +187,10 @@ Feature identifiers describe linguistic or geographic meaning rather than their 
     u.get_{configuration}()
     ```
 
-+ Replace `{configuration}` with `cache`, `aggregation`, `fill_with_base_lang`, or `distance_metric`.
++ Replace `{configuration}` with `cache`, `aggregation`, `fill_with_base_lang`, `distance_metric`, `include_lineage_in_eval`, or `restrict_ewave_to_own_languages`.
 + Replace `{option}` with your desired value for the selected configuration.
-+ Note: the default configurations are `cache=False`, `aggregation='U'`, `fill_with_base_lang=True`, and `distance_metric="angular"`.
++ Note: the default configurations are `cache=False`, `aggregation='U'`, `fill_with_base_lang=True`, `distance_metric="angular"`, `include_lineage_in_eval=False`, and `restrict_ewave_to_own_languages=True`.
++ NOTE: Setting `restrict_ewave_to_own_languages` to `True` immediately and irreversibly forces eWAVE-exclusive feature values for languages outside eWAVE's scope to -1 (missing) the next time that data is accessed or computed on. Setting it back to `False` afterward does not restore those values, unless URIEL+ is reset.
 
 ## Retrieving Loaded Features Examples
 
@@ -229,14 +228,36 @@ Feature identifiers describe linguistic or geographic meaning rather than their 
     ```python
     u.reset()
     ```
-+ Import (and replace all existing) data from a custom CSV file:
-  ```python
-    u.import_csv({file_path}, {index})
-    ```
++ NOTE: `reset()` only resets URIEL+'s in-memory attributes back to their initial state. It does not change or delete any files that were already written to disk when caching was enabled. If you want those cached files reset as well, you will need to remove or replace them manually.
 
 + Replace `{database}` with `saphon`, `bdproto`, `grambank`, `apics`, `ewave`, or `glottolog`.
 + Replace `{databases}` with arguments `"UPDATED_SAPHON"`, `"BDPROTO"`, `"GRAMBANK"`, `"APICS"`, `"EWAVE"`, and/or `"GLOTTOLOG"` (e.g., `"UPDATED_SAPHON"`, `"BDPROTO"`, `"EWAVE"`).
-+ Replace `{index}` with `0` for genetic data, `1` for typological data, `2` for geographic data, or `3` for script data.
+
+## Language Codes Examples
+
++ Checking How Languages Are Currently Identified:
+    ```python
+    u.get_codes()
+    ```
++ Returns `"Iso"` if languages are identified with ISO 639-3 codes, or `"Glotto"` if identified with Glottocodes. Defaults to `"Iso"`.
+
++ Checking If A Code Is An ISO 639-3 Code:
+    ```python
+    u.is_iso_code({language})
+    ```
+
++ Checking If A Code Is A Glottocode:
+    ```python
+    u.is_glottocode({language})
+    ```
+
++ Retrieving Dialects:
+    ```python
+    u.get_dialects()
+    ```
++ Returns a dictionary mapping the index of each base language in URIEL+'s typological languages array to a list of its dialect language codes. Works with either ISO 639-3 codes or Glottocodes, based on the current setting from `get_codes()`.
+
++ Replace `{language}` with a language code (e.g., `"stan1293"`, `"eng"`).
 
 ## Imputation Examples
 
@@ -253,6 +274,18 @@ Feature identifiers describe linguistic or geographic meaning rather than their 
 
 + Replace `{aggregation}` with `'U'` (union) or `'A'` (average).
 + Replace `{imputation_strategy}` with `midaspy`, `knn`, `softimpute`, or `mean`.
+
++ Retrieving The Languages Filled In Via Lineage-Based Imputation:
+    ```python
+    u.get_lineage_imputed_indices()
+    ```
++ Returns the set of language indices whose values were filled in using parent language (lineage) data during the most recent imputation run. Used together with the `include_lineage_in_eval` configuration when evaluating imputation quality.
+
++ Manually Setting The Lineage-Imputed Indices:
+    ```python
+    u.set_lineage_imputed_indices({indices})
+    ```
++ Replace `{indices}` with a set of language indices (e.g., `{0, 4, 7}`).
 
 ## Language Distance Calculation Examples
 
@@ -271,23 +304,24 @@ Feature identifiers describe linguistic or geographic meaning rather than their 
     u.get_vector({distance_type}, {languages})
     ```
 
-+ View URIEL+ Feature Coverage:
++ View URIEL+ Feature Coverage For All Resource Levels And Distance Types:
     ```python
-    u.feature_coverage("low-resource", "syntactic")
+    u.all_feature_coverage()
     ```
+
++ View URIEL+ Feature Coverage For A Specific Resource Level And Distance Type:
+    ```python
+    u.feature_coverage({resource_level}, {distance_type})
+    ```
++ Replace `{resource_level}` with `"high-resource"`, `"medium-resource"`, or `"low-resource"`.
 
 + Calculate Confidence Scores for Distances
     ```python
     print(u.confidence_score({language 1}, {language 2}, {distance_type}))
     ```
 
-+ Replace `{distance_type}` with a distance type (e.g., `"featural"`) or a list (e.g., `["syntactic"`, `"phonological"]`). Must be single distance type for retrieving language vectors.
++ Replace `{distance_type}` with a distance type (`"genetic"`, `"syntactic"`, `"featural"`, `"phonological"`, `"inventory"`, `"geographic"`, `"morphological"`, or `"script"`) or a list of distance types (e.g., `["syntactic", "phonological"]`). Must be a single distance type for retrieving language vectors and calculating feature coverage or confidence scores.
 + Replace `{features}` with a list of current features (e.g., `["S_SUBJECT_BEFORE_VERB", "P_VOICE"]`).
 + Replace `{languages}`, `{language 1}`, and `{language 2}` with language codes (e.g., `"stan1293"`, `"hind1269"`).
 + Replace `{source}` with one database (e.g., `"WALS"`) or all databases (`'A'`).
 + Note: the default `{source}` is all databases.
-
-
-
-
-

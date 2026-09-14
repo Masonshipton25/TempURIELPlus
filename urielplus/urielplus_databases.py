@@ -408,7 +408,7 @@ class URIELPlusDatabases(BaseURIEL):
 
 
             Returns:
-                dict: A mapping from each column name to True (disposition "represented" or "collapsed_into" —
+                dict: A mapping from each column name to True (disposition "represented" or "collapsed_into" -
                 the latter is written temporarily so inferred_features() can read it as an exact_collapse
                 operand, then purged by _removed_operand_features() once consumed) or False (disposition
                 "not_represented", excluded because it maps to no public feature at all, ever).
