@@ -593,7 +593,7 @@ class URIELPlusImputation(BaseURIEL):
     def _standard_impute(self, X, imputer_class, strategy, X_missing=None,
                     hyperparameter=None,
                     feature_types=None, missing_indices=None, midas_bin_vars=None,
-                    on_test_set=False, file_path_to_save_npz=None):
+                    on_test_set=False, file_path_to_save_npz=None, metrics_filename="imputation_metrics.csv"):
         """
             Imputes missing data using a specified imputation strategy.
 
@@ -608,6 +608,8 @@ class URIELPlusImputation(BaseURIEL):
                 midas_bin_vars (list, optional): List of binary variables for MIDAS imputation. Default is None.
                 on_test_set (bool, optional): Whether the imputation is being performed on a test set. Default is False.
                 file_path_to_save_npz (str, optional): Path to save the imputed data in NPZ format. Default is None.
+                metrics_filename (str, optional): Filename (not full path) to save the metrics CSV as, within
+                file_path_to_save_npz. Default is "imputation_metrics.csv".
 
             Returns:
                 np.ndarray: The imputed dataset.
@@ -686,7 +688,7 @@ class URIELPlusImputation(BaseURIEL):
             logging.info(f"Average feature metrics for {strategy} with hyperparameter {hyperparameter} across each imputed dataset: {avg_feature_metrics}")
             metrics_df = pd.DataFrame(avg_metrics, index=[0])
             if self.cache:
-                file_path = os.path.join(file_path_to_save_npz, "imputation_metrics.csv")
+                file_path = os.path.join(file_path_to_save_npz, metrics_filename)
                 metrics_df.to_csv(file_path, index=False)
             X_imputed = imputations[0].to_numpy()
             return X_imputed
@@ -712,7 +714,7 @@ class URIELPlusImputation(BaseURIEL):
                 # save metrics as a csv file
                 metrics_df = pd.DataFrame(metrics, index=[0])
                 if self.cache:
-                    file_path = os.path.join(file_path_to_save_npz, "imputation_metrics.csv")
+                    file_path = os.path.join(file_path_to_save_npz, metrics_filename)
                     metrics_df.to_csv(file_path, index=False)
             else:
                 logging.info(f"On test set, metrics for {strategy} with hyperparameter {hyperparameter}: {metrics}")
@@ -722,7 +724,7 @@ class URIELPlusImputation(BaseURIEL):
 
     def _hyperparameter_imputation(self, X, strategy, feature_types,
                               hyperparameter_range, eval_metric,
-                              test_quality=True, file_path_to_save_npz=None):
+                              test_quality=True, file_path_to_save_npz=None, metrics_filename="imputation_metrics.csv"):
         """
             Performs imputation using the best hyperparameter selected through cross-validation.
 
@@ -734,6 +736,7 @@ class URIELPlusImputation(BaseURIEL):
                 eval_metric (str): The evaluation metric to use ("f1", "rmse", etc.).
                 test_quality (bool, optional): Whether to evaluate the quality of imputation. Default is True.
                 file_path_to_save_npz (str, optional): Path to save the imputed data in NPZ format. Default is None.
+                metrics_filename (str, optional): Filename to save the metrics CSV as.
 
             Returns:
                 np.ndarray: The imputed dataset.
@@ -758,13 +761,13 @@ class URIELPlusImputation(BaseURIEL):
                                         hyperparameter=best_hyperparameter,
                                         feature_types=feature_types,
                                         missing_indices=missing_indices,
-                                        on_test_set=True)
+                                        on_test_set=True, metrics_filename=metrics_filename)
             X_missing, missing_indices = self._create_missing_values(X, missing_rate=0.2)
             _ = self._standard_impute(X=X, imputer_class=imputer_class,
                                 strategy=strategy, X_missing=X_missing,
                                 hyperparameter=best_hyperparameter,
                                 feature_types=feature_types,
-                                missing_indices=missing_indices)
+                                missing_indices=missing_indices, metrics_filename=metrics_filename)
 
         X_imputed = self._standard_impute(X=X, imputer_class=imputer_class,
                                     strategy=strategy,
@@ -828,7 +831,8 @@ class URIELPlusImputation(BaseURIEL):
 
 
     def _run_imputation_strategy(self, combined_df_u, strategy, feature_prefixes,
-                             hyperparameter_range, eval_metric, test_quality, file_path_to_save_npz):
+                             hyperparameter_range, eval_metric, test_quality, file_path_to_save_npz,
+                             metrics_filename="imputation_metrics.csv"):
         """
         Runs imputation using the specified strategy.
 
@@ -840,6 +844,7 @@ class URIELPlusImputation(BaseURIEL):
             eval_metric (str): The evaluation metric to use ("f1", "rmse", etc.).
             test_quality (bool): Whether to evaluate the quality of imputation.
             file_path_to_save_npz (str): The path to save imputation results and metrics.
+            metrics_filename (str, optional): Filename to save the metrics CSV as.
 
         Returns:
             np.ndarray: The imputed dataset.
@@ -851,7 +856,8 @@ class URIELPlusImputation(BaseURIEL):
                                                 hyperparameter_range=hyperparameter_range,
                                                 eval_metric=eval_metric,
                                                 test_quality=test_quality,
-                                                file_path_to_save_npz=file_path_to_save_npz)
+                                                file_path_to_save_npz=file_path_to_save_npz,
+                                                metrics_filename=metrics_filename)
         elif strategy == "midas":
             data_in, bin_vars = self._preprocess_midas(combined_df_u)
             X, feature_types = self._preprocess_data(data_in, feature_prefixes)
@@ -866,13 +872,15 @@ class URIELPlusImputation(BaseURIEL):
                                         feature_types=feature_types,
                                         missing_indices=missing_indices,
                                         midas_bin_vars=bin_vars,
-                                        file_path_to_save_npz=file_path_to_save_npz)
+                                        file_path_to_save_npz=file_path_to_save_npz,
+                                        metrics_filename=metrics_filename)
             else:
                 imputed = self._standard_impute(X=data_in, imputer_class=None,
                                         strategy=strategy,
                                         feature_types=feature_types,
                                         midas_bin_vars=bin_vars,
-                                        file_path_to_save_npz=file_path_to_save_npz)
+                                        file_path_to_save_npz=file_path_to_save_npz,
+                                        metrics_filename=metrics_filename)
         else:
             if test_quality:
                 X_missing, missing_indices = self._create_missing_values(X,
@@ -882,13 +890,15 @@ class URIELPlusImputation(BaseURIEL):
                                         strategy=strategy, X_missing=X_missing,
                                         feature_types=feature_types,
                                         missing_indices=missing_indices,
-                                        file_path_to_save_npz=file_path_to_save_npz)
+                                        file_path_to_save_npz=file_path_to_save_npz,
+                                        metrics_filename=metrics_filename)
             else:
                 imputer_class = SoftImpute if strategy == "softimpute" else SimpleImputer
                 imputed = self._standard_impute(X=X, imputer_class=imputer_class,
                                         strategy=strategy,
                                         feature_types=feature_types,
-                                        file_path_to_save_npz=file_path_to_save_npz)
+                                        file_path_to_save_npz=file_path_to_save_npz,
+                                        metrics_filename=metrics_filename)
         return imputed
 
 
@@ -921,7 +931,8 @@ class URIELPlusImputation(BaseURIEL):
 
         if not ewave_cols:
             return self._run_imputation_strategy(combined_df_u, strategy, feature_prefixes,
-                                             hyperparameter_range, eval_metric, test_quality, file_path_to_save_npz)
+                                             hyperparameter_range, eval_metric, test_quality, file_path_to_save_npz,
+                                             metrics_filename="imputation_metrics_typological.csv")
 
         non_ewave_cols = [c for c in combined_df_u.columns if c not in self.ewave_scope_feats]
         ewave_langs = self.ewave_scope_langs
@@ -932,7 +943,8 @@ class URIELPlusImputation(BaseURIEL):
 
         imputed_non_ewave = self._run_imputation_strategy(combined_df_u[non_ewave_cols], strategy, feature_prefixes,
                                                        hyperparameter_range, eval_metric, test_quality,
-                                                       file_path_to_save_npz)
+                                                       file_path_to_save_npz,
+                                                       metrics_filename="imputation_metrics_typological.csv")
         for j, col in enumerate(non_ewave_cols):
             imputed[:, col_position[col]] = imputed_non_ewave[:, j]
 
@@ -940,7 +952,8 @@ class URIELPlusImputation(BaseURIEL):
             ewave_subset_df = combined_df_u.loc[lang_mask, ewave_cols].reset_index(drop=True)
             imputed_ewave = self._run_imputation_strategy(ewave_subset_df, strategy, feature_prefixes,
                                                        hyperparameter_range, eval_metric, test_quality,
-                                                       file_path_to_save_npz)
+                                                       file_path_to_save_npz,
+                                                       metrics_filename="imputation_metrics_ewave.csv")
             lang_row_positions = np.where(lang_mask)[0]
             for j, col in enumerate(ewave_cols):
                 imputed[lang_row_positions, col_position[col]] = imputed_ewave[:, j]
@@ -1009,9 +1022,11 @@ class URIELPlusImputation(BaseURIEL):
                                                           hyperparameter_range, eval_metric, test_quality,
                                                           file_path_to_save_npz)
         else:
+            metrics_filename = "imputation_metrics_script.csv" if file == "script_features.npz" \
+                else "imputation_metrics_typological.csv"
             imputed = self._run_imputation_strategy(combined_df_u, strategy, feature_prefixes,
                                                  hyperparameter_range, eval_metric, test_quality,
-                                                 file_path_to_save_npz)
+                                                 file_path_to_save_npz, metrics_filename=metrics_filename)
 
         if file == "features.npz":
             self._apply_ewave_restriction_if_enabled(
